@@ -1,0 +1,235 @@
+{% extends 'base.html' %}
+
+{% block title %}Registrar Pago{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">🎟️ Registrar Pago Manual</h2>
+
+<form method="POST" class="card p-4 shadow mb-5 border border-2 bg-light">
+  {% set evento_id = request.form.get('evento_id') or evento.id if evento else None %}
+  {% set evento = eventos|selectattr('id', 'equalto', evento_id|int)|first if evento_id else None %}
+  {% set telefono_form = request.form.get('telefono', telefono or '') %}
+  {% set monto_form = request.form.get('monto', '') %}
+  {% set abonado_form = request.form.get('abonado', '') %}
+
+  <div class="mb-3">
+    <label class="form-label">👤 Cliente</label>
+    <select name="telefono" class="form-select" required>
+      <option disabled value="">Selecciona un cliente</option>
+      {% for u in usuarios %}
+      <option value="{{ u.telefono }}" {% if telefono_form == u.telefono %}selected{% endif %}>
+        {{ u.nombre }} - {{ u.telefono }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="mb-4">
+    <label class="form-label">🎤 Concierto</label>
+    <select name="evento_id" class="form-select" required onchange="this.form.submit()">
+      <option disabled value="" {% if not evento_id %}selected{% endif %}>Selecciona un concierto</option>
+      {% for e in eventos %}
+      <option value="{{ e.id }}" {% if evento_id|int == e.id %}selected{% endif %}>
+        {{ e.nombre }} ({{ e.lugar }}, {{ e.fecha.strftime('%d/%m/%Y') }})
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  {% if evento %}
+  <div class="mb-4">
+    <label class="form-label"><strong>💰 Precios por Zona</strong></label>
+    {% set zonas = evento.precios_por_zona|cargar_json %}
+    {% if zonas %}
+    <table class="table table-bordered table-sm text-center bg-white">
+      <thead class="table-light">
+        <tr><th>Zona</th><th>Precio</th></tr>
+      </thead>
+      <tbody>
+        {% for zona, precio in zonas.items() %}
+        <tr>
+          <td><span class="badge bg-primary px-3 py-2">{{ zona }}</span></td>
+          <td><strong>${{ '%.2f'|format(precio) }}</strong></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-muted">No se definieron precios por zona.</p>
+    {% endif %}
+  </div>
+
+  <div class="mb-4">
+    <label class="form-label">🪑 Asientos disponibles</label>
+    <div class="d-flex flex-wrap gap-2">
+      {% for asiento in evento.asientos.split(', ') %}
+      <div class="form-check form-check-inline">
+        <input class="btn-check" type="checkbox" name="asientos" id="asiento_{{ asiento }}" value="{{ asiento }}"
+          onchange="actualizarSeleccion()" {% if asiento in request.form.getlist('asientos') %}checked{% endif %}>
+        <label class="btn btn-outline-primary" for="asiento_{{ asiento }}">{{ asiento }}</label>
+      </div>
+      {% endfor %}
+    </div>
+    <small class="text-muted mt-2 d-block">Seleccionados: <span id="seleccionados">0</span></small>
+  </div>
+
+  {% if evento.imagen_asientos %}
+  <div class="mb-4 text-center">
+    <label class="form-label"><strong>🗺️ Mapa de Asientos</strong></label><br>
+    <img src="{{ evento.imagen_asientos }}" alt="Mapa de asientos" class="img-fluid rounded border"
+      style="max-height:400px;">
+  </div>
+  {% endif %}
+  {% endif %}
+
+  <div class="mb-3">
+    <label class="form-label">📆 Tipo de pago</label>
+    <select class="form-select" name="tipo_pago">
+      <option value="">Contado</option>
+      <option value="mensual" {% if request.form.get('tipo_pago') == 'mensual' %}selected{% endif %}>Mensual</option>
+      <option value="semanal" {% if request.form.get('tipo_pago') == 'semanal' %}selected{% endif %}>Semanal</option>
+    </select>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">🧾 Parcialidad</label>
+    <input type="text" class="form-control" name="parcialidad" placeholder="Ej. 1 de 4"
+      value="{{ request.form.get('parcialidad', '') }}">
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">💳 Método de Pago</label>
+    <select class="form-select" name="notas" required>
+      <option value="">Selecciona un método</option>
+      <option value="efectivo" {% if request.form.get('notas') == 'efectivo' %}selected{% endif %}>Efectivo</option>
+      <option value="transferencia" {% if request.form.get('notas') == 'transferencia' %}selected{% endif %}>Transferencia</option>
+      <option value="tarjeta" {% if request.form.get('notas') == 'tarjeta' %}selected{% endif %}>Tarjeta</option>
+      <option value="mercado_pago" {% if request.form.get('notas') == 'mercado_pago' %}selected{% endif %}>MercadoPago</option>
+      <option value="paypal" {% if request.form.get('notas') == 'paypal' %}selected{% endif %}>PayPal</option>
+    </select>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">💵 Monto Total (MXN)</label>
+    <input type="number" name="monto" class="form-control" placeholder="Ej. 1000.00" required step="0.01"
+      value="{{ monto_form }}" readonly>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">💸 Monto Abonado (MXN)</label>
+    <input type="number" name="abonado" class="form-control" placeholder="Ej. 250.00" required step="0.01"
+      value="{{ abonado_form }}">
+  </div>
+
+  <div class="alert alert-info" id="restante_info" style="display: none;"></div>
+
+  <div class="d-grid">
+    <button class="btn btn-success btn-lg">💾 Registrar Pago</button>
+  </div>
+</form>
+
+<div id="resumen_pago" class="alert alert-primary mt-4"></div>
+
+<script>
+  let preciosPorZona = {{ evento.precios_por_zona|cargar_json | tojson }};
+
+  function actualizarSeleccion() {
+    const seleccionados = document.querySelectorAll('input[name="asientos"]:checked');
+    const totalSeleccionados = seleccionados.length;
+    document.getElementById('seleccionados').innerText = totalSeleccionados;
+    calcularMontos();
+  }
+
+  function obtenerZona(asiento) {
+    return asiento.replace(/[0-9]/g, '').toUpperCase();
+  }
+
+  function calcularMontos() {
+    const asientosSeleccionados = Array.from(document.querySelectorAll('input[name="asientos"]:checked'));
+    const montoInput = document.querySelector('input[name="monto"]');
+    const abonadoInput = document.querySelector('input[name="abonado"]');
+    const parcialidadInput = document.querySelector('input[name="parcialidad"]');
+    const tipoPago = document.querySelector('select[name="tipo_pago"]').value;
+    const resumen = document.getElementById('resumen_pago');
+    const restanteDiv = document.getElementById('restante_info');
+
+    let total = 0;
+    let errores = [];
+
+    asientosSeleccionados.forEach(asiento => {
+      const zona = obtenerZona(asiento.value);
+      const precio = preciosPorZona[zona];
+      if (precio !== undefined) {
+        total += parseFloat(precio);
+      } else {
+        errores.push(zona);
+      }
+    });
+
+    if (errores.length > 0) {
+      resumen.innerHTML = `<div class="alert alert-warning">⚠️ No se encontraron precios para las zonas: ${errores.join(', ')}</div>`;
+      montoInput.value = '';
+      restanteDiv.style.display = 'none';
+      return;
+    }
+
+    montoInput.value = total.toFixed(2);
+
+    let abonado = parseFloat(abonadoInput.value || 0);
+    let restante = total - abonado;
+    if (restante < 0) restante = 0;
+
+    let parcialidadTexto = parcialidadInput.value.trim();
+    let totalParcialidades = 1;
+
+    if (parcialidadTexto.includes("de")) {
+      const partes = parcialidadTexto.split("de");
+      const num = parseInt(partes[1].trim());
+      if (!isNaN(num) && num > 0) totalParcialidades = num;
+    } else {
+      const num = parseInt(parcialidadTexto);
+      if (!isNaN(num) && num > 0) totalParcialidades = num;
+    }
+
+    let resumenTexto = "";
+
+    if (tipoPago === "mensual") {
+      const mensual = (restante / totalParcialidades).toFixed(2);
+      resumenTexto = `
+        💡 <strong>Pago mensual:</strong> ${totalParcialidades} pagos de <strong>$${mensual}</strong><br>
+        💸 <strong>Ya abonaste:</strong> $${abonado.toFixed(2)}<br>
+        💰 <strong>Restante:</strong> $${restante.toFixed(2)}<br>
+        📅 Cada 30 días`;
+    } else if (tipoPago === "semanal") {
+      const semanal = (restante / totalParcialidades).toFixed(2);
+      resumenTexto = `
+        💡 <strong>Pago semanal:</strong> ${totalParcialidades} pagos de <strong>$${semanal}</strong><br>
+        💸 <strong>Ya abonaste:</strong> $${abonado.toFixed(2)}<br>
+        💰 <strong>Restante:</strong> $${restante.toFixed(2)}<br>
+        📅 Cada 7 días`;
+    } else {
+      resumenTexto = `
+        💵 <strong>Pago único:</strong> ${asientosSeleccionados.length} asientos = <strong>$${total.toFixed(2)}</strong><br>
+        💸 <strong>Ya abonaste:</strong> $${abonado.toFixed(2)}<br>
+        💰 <strong>Restante:</strong> $${restante.toFixed(2)}`;
+    }
+
+    resumen.innerHTML = resumenTexto;
+    restanteDiv.style.display = "block";
+    restanteDiv.innerHTML = `💰 <strong>Restante por pagar:</strong> $${restante.toFixed(2)}`;
+  }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    actualizarSeleccion();
+
+    document.querySelectorAll('input[name="asientos"]').forEach(el => {
+      el.addEventListener('change', actualizarSeleccion);
+    });
+
+    document.querySelector('input[name="abonado"]').addEventListener('input', calcularMontos);
+    document.querySelector('select[name="tipo_pago"]').addEventListener('change', calcularMontos);
+    document.querySelector('input[name="parcialidad"]').addEventListener('input', calcularMontos);
+  });
+</script>
+
+{% endblock %}

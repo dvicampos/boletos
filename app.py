@@ -1,0 +1,661 @@
+from flask import Flask, render_template, request, redirect
+from db import init_db
+from models import db, Usuario, Evento, Pago, Recordatorio
+from whatsapp_bot import bot_bp
+from reminders import iniciar_scheduler
+from flask_login import LoginManager
+from flask_mail import Mail
+from models import AdminUser
+from flask import session, flash, url_for, render_template
+from flask_login import login_user, logout_user, login_required, current_user
+from flask_mail import Message
+from itsdangerous import URLSafeTimedSerializer
+from flask_migrate import Migrate
+import os
+from werkzeug.utils import secure_filename
+import json
+from reminders import iniciar_scheduler
+from datetime import datetime, timedelta
+from sqlalchemy import text
+from datetime import date
+from datetime import datetime
+
+login_manager = LoginManager()
+mail = Mail()
+
+app = Flask(__name__)
+login_manager.init_app(app)
+init_db(app)
+mail.init_app(app)
+migrate = Migrate(app, db)
+
+app.config['SECRET_KEY'] = 'clave-super-secreta'
+app.config['MAIL_SERVER'] = 'smtp.gmail.com'
+app.config['MAIL_PORT'] = 587
+app.config['MAIL_USE_TLS'] = True
+app.config['MAIL_USERNAME'] = 'dvicamp@gmail.com'
+app.config['MAIL_PASSWORD'] = 'pwsd gwrz lzdi cyzv'
+
+# twilio
+app.config['TWILIO_ACCOUNT_SID'] = 'AC411c94cb166377f45f82a2898d28a173'
+app.config['TWILIO_AUTH_TOKEN'] = 'b9d6a45fd9198c08ed06c029432ff5e1'
+app.config['TWILIO_WHATSAPP_NUMBER'] = 'whatsapp:+14155238886'
+
+# carpetas 
+
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), 'static/uploads')
+os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024  # Máx 5 MB
+app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg', 'gif'}
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
+@login_manager.user_loader
+def load_user(user_id):
+    return AdminUser.query.get(int(user_id))
+
+# ----------------------------
+# CRUD PAGOS DE BOLETOS
+# ----------------------------
+
+from whatsapp_utils import enviar_whatsapp
+import json
+app.jinja_env.filters['cargar_json'] = lambda val: json.loads(val or "{}")
+
+@app.route('/pagos', methods=['GET', 'POST'])
+@login_required
+def registrar_pagos():
+    eventos = Evento.query.all()
+    usuarios = Usuario.query.order_by(Usuario.nombre).all()
+    telefono_prellenado = request.args.get('telefono', '')
+
+    if request.method == 'POST':
+        evento_id = request.form.get('evento_id')
+        telefono = request.form.get('telefono') or request.form.get('telefono_hidden')
+        monto = request.form.get('monto')
+        abonado = request.form.get('abonado')
+        asientos_seleccionados = request.form.getlist('asientos')
+        tipo_pago = request.form.get("tipo_pago")
+        parcialidad = request.form.get("parcialidad")
+        notas = request.form.get("notas")
+        evento = Evento.query.get(int(evento_id)) if evento_id else None
+
+        # Analiza parcialidad tipo "1 de 4"
+        parcialidad_total = int(parcialidad.split('de')[1].strip()) if parcialidad and 'de' in parcialidad else 1
+
+        try:
+            abonado_float = float(abonado)
+        except (ValueError, TypeError):
+            abonado_float = 0.0
+
+        try:
+            monto_float = float(monto)
+        except (ValueError, TypeError):
+            monto_float = 0.0
+
+        # Luego úsalo con seguridad
+        if abonado_float >= monto_float:
+            estatus = 'liquidado'
+        elif abonado_float > 0:
+            estatus = 'parcial'
+        else:
+            estatus = 'pendiente'
+
+
+        errores = []
+        if not telefono:
+            errores.append("📱 Teléfono no seleccionado.")
+        if not monto:
+            errores.append("💰 Monto no ingresado.")
+        if not evento:
+            errores.append("🎤 Evento no válido.")
+        if not asientos_seleccionados:
+            errores.append("🪑 No se seleccionaron asientos.")
+
+        if errores:
+            for e in errores:
+                flash(e)
+            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono)
+
+        usuario = Usuario.query.filter_by(telefono=telefono).first()
+        if not usuario:
+            flash(f"ℹ️ El teléfono {telefono} no está registrado. Regístralo primero.")
+            return redirect(url_for('registrar_usuario', telefono=telefono))
+
+        disponibles = evento.asientos.split(', ')
+        if not all(a in disponibles for a in asientos_seleccionados):
+            flash("❌ Uno o más asientos ya no están disponibles.")
+            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono)
+
+        monto_total = float(monto)
+        pago_unitario = monto_total / len(asientos_seleccionados)
+
+        for asiento in asientos_seleccionados:
+            pago = Pago(
+                usuario_id=usuario.id,
+                evento_id=evento.id,
+                asiento=asiento,
+                fecha_pago=datetime.now(),
+                monto=pago_unitario,
+                abonado=float(abonado) / len(asientos_seleccionados),
+                confirmado=True,
+                tipo_pago=tipo_pago or "contado",
+                parcialidad=parcialidad,
+                notas=notas,
+                estatus_pago=estatus,
+            )
+            db.session.add(pago)
+            disponibles.remove(asiento)
+
+        evento.asientos = ', '.join(disponibles)
+        db.session.commit()
+
+        # Verificar si ya liquidó
+        pagos_usuario = Pago.query.filter_by(usuario_id=usuario.id, evento_id=evento.id).all()
+        total_abonado = sum(p.abonado for p in pagos_usuario)
+
+        if total_abonado >= monto_total:
+            for p in pagos_usuario:
+                p.estatus_pago = 'liquidado'
+            db.session.commit()
+
+        # Lógica de recordatorios
+        recordatorios_generados = []
+        if tipo_pago == 'mensual':
+            dias_entre_pagos = 30
+        elif tipo_pago == 'semanal':
+            dias_entre_pagos = 7
+        else:
+            dias_entre_pagos = 0
+
+        if parcialidad_total > 1:
+            pago_parcial = monto_total / parcialidad_total
+            for i in range(1, parcialidad_total):  # ya pagó la primera
+                fecha_r = datetime.now().date() + timedelta(days=i * dias_entre_pagos)
+                r = Recordatorio(
+                    usuario_id=usuario.id,
+                    evento_id=evento.id,
+                    fecha_recordatorio=fecha_r,
+                    tipo="pago",
+                    enviado=False,
+                    notas=f"Pago {i+1} de {parcialidad_total} - Monto ${pago_parcial:.2f}"
+                )
+                db.session.add(r)
+                recordatorios_generados.append((fecha_r, pago_parcial))
+
+        # Recordatorio antes del evento
+        recordatorio_evento = Recordatorio(
+            usuario_id=usuario.id,
+            evento_id=evento.id,
+            fecha_recordatorio=evento.fecha - timedelta(days=1),
+            tipo="evento",
+            enviado=False
+        )
+        db.session.add(recordatorio_evento)
+        db.session.commit()
+
+        # Mensaje resumen por WhatsApp
+        try:
+            mensaje_resumen = f"🎟️ *Resumen de tu compra para {evento.nombre}*\n"
+            mensaje_resumen += f"👤 {usuario.nombre}\n"
+            mensaje_resumen += f"🎫 Asientos: {', '.join(asientos_seleccionados)}\n"
+            mensaje_resumen += f"💰 Monto total: ${monto_total:.2f}\n"
+            mensaje_resumen += f"📅 Tipo de pago: *{tipo_pago or 'contado'}*\n"
+            mensaje_resumen += f"💵 Total: ${monto_total:.2f}\n"
+            mensaje_resumen += f"💸 Abonado: ${float(abonado):.2f}\n"
+            mensaje_resumen += f"📅 Tipo de pago: *{tipo_pago or 'contado'}*\n"
+
+            if recordatorios_generados:
+                mensaje_resumen += "\n🗖️ Próximos pagos:\n"
+                for fecha, pago in recordatorios_generados:
+                    mensaje_resumen += f"• {fecha.strftime('%d/%m/%Y')} → ${pago:.2f}\n"
+
+            mensaje_resumen += "\n✅ ¡Gracias por tu compra! Recibirás recordatorios automáticos."
+            enviar_whatsapp(usuario.telefono, mensaje_resumen)
+
+        except Exception as e:
+            print("❌ Error al enviar resumen por WhatsApp:", e)
+
+        flash(f"✅ Pago registrado para {len(asientos_seleccionados)} asiento(s).")
+        return redirect(url_for('registrar_pagos'))
+
+    return render_template(
+        'pagos/pagos.html',
+        eventos=eventos,
+        evento=None,
+        usuarios=usuarios,
+        telefono=telefono_prellenado
+    )
+
+@app.route('/pagos/listar')
+@login_required
+def listar_pagos():
+    pagos = Pago.query.order_by(Pago.fecha_pago.desc()).all()
+    return render_template('pagos/listar.html', pagos=pagos)
+
+@app.route('/pagos/<int:pago_id>')
+@login_required
+def detalle_pago(pago_id):
+    pago = Pago.query.get_or_404(pago_id)
+    return render_template('pagos/detalle.html', pago=pago)
+
+@app.route('/pagos/editar/<int:pago_id>', methods=['GET', 'POST'])
+@login_required
+def editar_pago(pago_id):
+    pago = Pago.query.get_or_404(pago_id)
+    eventos = Evento.query.all()
+    usuarios = Usuario.query.all()
+
+    if request.method == 'POST':
+        pago.monto = float(request.form['monto'])
+        pago.asiento = request.form['asiento']
+        pago.confirmado = 'confirmado' in request.form
+        db.session.commit()
+        flash("✅ Pago actualizado.")
+        return redirect(url_for('listar_pagos'))
+
+    return render_template('pagos/editar.html', pago=pago, eventos=eventos, usuarios=usuarios)
+
+@app.route('/pagos/eliminar/<int:pago_id>', methods=['POST'])
+@login_required
+def eliminar_pago(pago_id):
+    pago = Pago.query.get_or_404(pago_id)
+    evento = Evento.query.get(pago.evento_id)
+
+    if evento:
+        # Convertir a lista
+        disponibles = evento.asientos.split(', ') if evento.asientos else []
+        # Evitar duplicados
+        if pago.asiento not in disponibles:
+            disponibles.append(pago.asiento)
+            disponibles.sort()  # opcional, por orden
+
+        evento.asientos = ', '.join(disponibles)
+
+    db.session.delete(pago)
+    db.session.commit()
+    flash("🗑️ Pago eliminado y asiento liberado.")
+    return redirect(url_for('listar_pagos'))
+
+
+# ----------------------------
+# CRUD CLIENTES USUARIOS
+# ----------------------------
+
+# 🟡 CREAR
+@app.route("/registrar-usuario", methods=["GET", "POST"])
+@login_required
+def registrar_usuario():
+    telefono = request.args.get("telefono", "")
+    if request.method == "POST":
+        nuevo = Usuario(
+            nombre=request.form["nombre"],
+            direccion=request.form["direccion"],
+            edad=int(request.form["edad"]),
+            telefono=request.form["telefono"],
+            email=request.form["email"],
+            ciudad=request.form["ciudad"],
+            plan_pago=request.form["plan_pago"],
+            estado="vigente"
+        )
+        db.session.add(nuevo)
+        db.session.commit()
+        flash("✅ Usuario registrado.")
+        return redirect(url_for("listar_usuarios"))
+    return render_template("usuarios/crear.html", telefono=telefono)
+
+
+# 🟢 LISTADO
+@app.route("/usuarios")
+@login_required
+def listar_usuarios():
+    usuarios = Usuario.query.order_by(Usuario.nombre).all()
+    return render_template("usuarios/listar.html", usuarios=usuarios)
+
+# 🟠 EDITAR
+@app.route("/usuarios/editar/<int:id>", methods=["GET", "POST"])
+@login_required
+def editar_usuario(id):
+    usuario = Usuario.query.get_or_404(id)
+    if request.method == "POST":
+        usuario.nombre = request.form["nombre"]
+        usuario.direccion = request.form["direccion"]
+        usuario.edad = int(request.form["edad"])
+        usuario.telefono = request.form["telefono"]
+        usuario.email = request.form["email"]
+        usuario.ciudad = request.form["ciudad"]
+        usuario.plan_pago = request.form["plan_pago"]
+        db.session.commit()
+        flash("✅ Usuario actualizado.")
+        return redirect(url_for("listar_usuarios"))
+    return render_template("usuarios/editar.html", usuario=usuario)
+
+# 🔴 ELIMINAR
+@app.route("/usuarios/eliminar/<int:id>", methods=["POST"])
+@login_required
+def eliminar_usuario(id):
+    usuario = Usuario.query.get_or_404(id)
+    db.session.delete(usuario)
+    db.session.commit()
+    flash("🗑️ Usuario eliminado.")
+    return redirect(url_for("listar_usuarios"))
+
+# ----------------------------
+# CRUD LOGEO
+# ----------------------------
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    if request.method == "POST":
+        email = request.form["email"]
+        password = request.form["password"]
+        user = AdminUser(email=email)
+        user.set_password(password)
+        db.session.add(user)
+        db.session.commit()
+        flash("Usuario registrado, inicia sesión.")
+        return redirect(url_for("login"))
+    return render_template("register.html")
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        email = request.form["email"]
+        password = request.form["password"]
+        user = AdminUser.query.filter_by(email=email).first()
+        if user and user.check_password(password):
+            login_user(user)
+            return redirect(url_for("registrar_pagos"))
+        flash("Credenciales inválidas")
+    return render_template("login.html")
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return redirect(url_for("login"))
+
+@app.route("/reset", methods=["GET", "POST"])
+def reset_request():
+    if request.method == "POST":
+        email = request.form["email"]
+        user = AdminUser.query.filter_by(email=email).first()
+        if user:
+            s = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+            token = s.dumps(email, salt='reset-salt')
+            user.reset_token = token
+            db.session.commit()
+
+            msg = Message("Reestablece tu contraseña", sender="no-reply@credi.com", recipients=[email])
+            reset_url = url_for('reset_token', token=token, _external=True)
+            msg.body = f"Da clic aquí para restablecer tu contraseña:\n{reset_url}"
+            mail.send(msg)
+            flash("Correo enviado")
+        else:
+            flash("Correo no encontrado")
+    return render_template("reset_request.html")
+
+@app.route("/reset/<token>", methods=["GET", "POST"])
+def reset_token(token):
+    s = URLSafeTimedSerializer(app.config['SECRET_KEY'])
+    try:
+        email = s.loads(token, salt='reset-salt', max_age=3600)
+    except:
+        flash("Token inválido o expirado")
+        return redirect(url_for("reset_request"))
+
+    user = AdminUser.query.filter_by(email=email).first()
+
+    if request.method == "POST":
+        new_pass = request.form["password"]
+        user.set_password(new_pass)
+        user.reset_token = None
+        db.session.commit()
+        flash("Contraseña restablecida, inicia sesión.")
+        return redirect(url_for("login"))
+
+    return render_template("reset_form.html")
+
+# Agrega esto a tu app.py
+from datetime import datetime
+
+# ----------------------------
+# CRUD CONCIERTOS
+# ----------------------------
+@app.route("/vista_eventos")
+def vista_eventos():
+    eventos = Evento.query.all()
+    eventos_info = []
+
+    for evento in eventos:
+        total_asientos = len(evento.asientos.split(',')) if evento.asientos else 0
+        boletos_vendidos = Pago.query.filter_by(evento_id=evento.id).count()
+
+        zonas = []
+        if evento.precios_por_zona:
+            import json
+            try:
+                zonas = json.loads(evento.precios_por_zona).items()
+            except:
+                zonas = []
+
+        eventos_info.append({
+            "id": evento.id,
+            "nombre": evento.nombre,
+            "fecha": evento.fecha.strftime("%d/%m/%Y"),
+            "lugar": evento.lugar,
+            "asientos_totales": total_asientos,
+            "boletos_vendidos": boletos_vendidos,
+            "zonas": zonas,
+            "portada": evento.portada
+        })
+
+    return render_template("eventos/vista_publica.html", eventos=eventos_info, year=datetime.now().year)
+
+@app.route("/eventos")
+@login_required
+def listar_eventos():
+    eventos = Evento.query.all()
+    return render_template("eventos/listar.html", eventos=eventos)
+
+@app.route("/eventos/nuevo", methods=["GET", "POST"])
+@login_required
+def crear_evento():
+    if request.method == "POST":
+        nombre = request.form['nombre']
+        lugar = request.form['lugar']
+        fecha = datetime.strptime(request.form['fecha'], "%Y-%m-%d")
+        descripcion = request.form.get('descripcion', '')
+        asientos = request.form['asientos']
+        latitud = request.form.get('latitud')
+        longitud = request.form.get('longitud')
+
+        # Subida de imagen del cartel
+        cartel_file = request.files.get('portada')
+        portada_path = None
+        if cartel_file and allowed_file(cartel_file.filename):
+            filename = secure_filename("portada_" + cartel_file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            cartel_file.save(filepath)
+            portada_path = filename
+
+        # Subida de mapa de asientos
+        mapa_file = request.files.get('imagen_asientos')
+        imagen_path = None
+        if mapa_file and allowed_file(mapa_file.filename):
+            filename = secure_filename("mapa_" + mapa_file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            mapa_file.save(filepath)
+            imagen_path = filename
+
+        zonas = request.form.getlist('zona[]')
+        precios = request.form.getlist('precio_zona[]')
+        precios_dict = {}
+        for zona, p in zip(zonas, precios):
+            zona = zona.strip().upper()
+            try:
+                precios_dict[zona] = float(p)
+            except ValueError:
+                continue
+
+        evento = Evento(
+            nombre=nombre,
+            lugar=lugar,
+            fecha=fecha,
+            descripcion=descripcion,
+            asientos=asientos,
+            imagen_asientos=imagen_path,
+            portada=portada_path,
+            precios_por_zona=json.dumps(precios_dict),
+            latitud=latitud,
+            longitud=longitud
+        )
+
+        db.session.add(evento)
+        db.session.commit()
+        flash("✅ Evento creado correctamente.")
+        return redirect(url_for("listar_eventos"))
+
+    return render_template("eventos/nuevo.html")
+
+@app.route("/evento/<int:evento_id>")
+def ver_evento(evento_id):
+    evento = Evento.query.get_or_404(evento_id)
+
+    zonas = json.loads(evento.precios_por_zona or "{}")
+    asientos = evento.asientos.split(",") if evento.asientos else []
+
+    return render_template("eventos/ver_evento.html", evento=evento, zonas=zonas, asientos=asientos)
+
+# @app.route("/eventos/nuevo", methods=["GET", "POST"])
+# @login_required
+# def crear_evento():
+#     if request.method == "POST":
+#         nombre = request.form['nombre']
+#         lugar = request.form['lugar']
+#         fecha = datetime.strptime(request.form['fecha'], "%Y-%m-%d")
+#         asientos = request.form['asientos']
+
+#         # Subida de imagen
+#         imagen_file = request.files.get('imagen_asientos')
+#         imagen_path = None
+#         if imagen_file and allowed_file(imagen_file.filename):
+#             filename = secure_filename(imagen_file.filename)
+#             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+#             imagen_file.save(filepath)
+#             imagen_path = f"/static/uploads/{filename}"
+
+#         # Precios por zona
+#         zonas = request.form.getlist('zona[]')
+#         precios = request.form.getlist('precio_zona[]')
+#         precios_dict = {}
+
+#         for zona, p in zip(zonas, precios):
+#             zona = zona.strip().upper()
+#             try:
+#                 precios_dict[zona] = float(p)
+#             except ValueError:
+#                 continue  # Ignorar precios inválidos
+
+#         evento = Evento(
+#             nombre=nombre,
+#             lugar=lugar,
+#             fecha=fecha,
+#             asientos=asientos,
+#             imagen_asientos=imagen_path,
+#             precios_por_zona=json.dumps(precios_dict)
+#         )
+
+#         db.session.add(evento)
+#         db.session.commit()
+#         flash("✅ Evento creado correctamente.")
+#         return redirect(url_for("listar_eventos"))
+
+#     return render_template("eventos/nuevo.html")
+
+@app.route("/eventos/editar/<int:id>", methods=["GET", "POST"])
+@login_required
+def editar_evento(id):
+    evento = Evento.query.get_or_404(id)
+
+    if request.method == "POST":
+        evento.nombre = request.form['nombre']
+        evento.lugar = request.form['lugar']
+        evento.fecha = datetime.strptime(request.form['fecha'], "%Y-%m-%d")
+        evento.asientos = request.form['asientos']
+
+        imagen_file = request.files.get('imagen_asientos')
+        if imagen_file and allowed_file(imagen_file.filename):
+            filename = secure_filename(imagen_file.filename)
+            filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
+            imagen_file.save(filepath)
+            evento.imagen_asientos = f"/static/uploads/{filename}"
+
+        # Actualizar zonas
+        zonas = request.form.getlist('zona[]')
+        precios = request.form.getlist('precio_zona[]')
+        precios_dict = {}
+        for zona, p in zip(zonas, precios):
+            zona = zona.strip().upper()
+            try:
+                precios_dict[zona] = float(p)
+            except ValueError:
+                continue
+        evento.precios_por_zona = json.dumps(precios_dict)
+
+        db.session.commit()
+        flash("✅ Evento actualizado correctamente.")
+        return redirect(url_for("listar_eventos"))
+
+    return render_template("eventos/editar.html", evento=evento)
+
+
+@app.route('/eventos/eliminar/<int:evento_id>', methods=['POST'])
+@login_required
+def eliminar_evento(evento_id):
+    evento = Evento.query.get_or_404(evento_id)
+    Recordatorio.query.filter_by(evento_id=evento.id).delete()
+    Pago.query.filter_by(evento_id=evento.id).delete()
+    db.session.delete(evento)
+    db.session.commit()
+    flash('🎤 Evento eliminado correctamente.')
+    return redirect(url_for('listar_eventos'))
+
+@app.route('/dashboard')
+@login_required
+def dashboard():
+    # Gráfica de recordatorios
+    recordatorios = db.session.execute(text("""
+        SELECT tipo, enviado, COUNT(*) as total
+        FROM Recordatorio
+        GROUP BY tipo, enviado
+    """)).fetchall()
+
+    # Gráfica de pagos por mes
+    pagos = db.session.execute(text("""
+        SELECT TO_CHAR(fecha_pago, 'YYYY-MM') as mes, SUM(monto) as total_pagado
+        FROM Pago
+        GROUP BY mes
+        ORDER BY mes
+    """)).fetchall()
+
+    # Pagos pendientes (recordatorios tipo pago y no enviados, con fecha pasada)
+    pendientes = db.session.execute(text("""
+        SELECT u.nombre, u.telefono, e.nombre AS evento, r.fecha_recordatorio
+        FROM Recordatorio r
+        JOIN Usuario u ON r.usuario_id = u.id
+        JOIN Evento e ON r.evento_id = e.id
+        WHERE r.tipo = 'pago' AND r.enviado = FALSE AND r.fecha_recordatorio < :hoy
+        ORDER BY r.fecha_recordatorio ASC
+    """), {"hoy": date.today()}).fetchall()
+
+    return render_template('dashboard.html', recordatorios=recordatorios, pagos=pagos, pendientes=pendientes)
+
+iniciar_scheduler(app)
+app.register_blueprint(bot_bp)
+
+if __name__ == '__main__':
+    app.run(debug=True)

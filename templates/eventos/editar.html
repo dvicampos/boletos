@@ -1,0 +1,68 @@
+{% extends 'base.html' %}
+{% block title %}Nuevo Evento{% endblock %}
+{% block content %}
+<h2>{% if evento %}Editar{% else %}Nuevo{% endif %} Evento</h2>
+<form method="POST">
+  <div class="mb-3">
+    <label>Nombre</label>
+    <input name="nombre" class="form-control" value="{{ evento.nombre if evento else '' }}">
+  </div>
+  <div class="mb-3">
+    <label>Lugar</label>
+    <input name="lugar" class="form-control" value="{{ evento.lugar if evento else '' }}">
+  </div>
+  <div class="mb-3">
+    <label>Fecha</label>
+    <input type="date" name="fecha" class="form-control"
+      value="{{ evento.fecha.strftime('%Y-%m-%d') if evento else '' }}">
+  </div>
+  <div class="mb-3">
+    <label>Precio</label>
+    <input name="precio" type="number" step="0.01" class="form-control" value="{{ evento.precio if evento else '' }}">
+  </div>
+  <div class="mb-3">
+    <label>Asientos</label>
+    <textarea name="asientos" class="form-control">{{ evento.asientos if evento else '' }}</textarea>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Filas (separadas por coma, ej: A,B,C)</label>
+    <input type="text" id="filas" class="form-control" placeholder="A,B,C">
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Asientos por fila</label>
+    <input type="number" id="asientos_por_fila" class="form-control" placeholder="10">
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">Resultado (asientos generados)</label>
+    <textarea name="asientos" id="asientos" class="form-control" rows="3" readonly required></textarea>
+  </div>
+
+  <button type="button" class="btn btn-outline-primary mb-4" onclick="generarAsientos()">Generar Asientos</button>
+
+  <script>
+    function generarAsientos() {
+      const filas = document.getElementById("filas").value.split(',');
+      const num = parseInt(document.getElementById("asientos_por_fila").value);
+      let resultado = [];
+
+      for (let fila of filas) {
+        fila = fila.trim().toUpperCase();
+        for (let i = 1; i <= num; i++) {
+          resultado.push(`${fila}${i}`);
+        }
+      }
+
+      document.getElementById("asientos").value = resultado.join(', ');
+    }
+  </script>
+
+  <div class="mb-3">
+    <label>URL de imagen de asientos</label>
+    <input name="imagen_asientos" class="form-control" value="{{ evento.imagen_asientos if evento else '' }}">
+  </div>
+  <button class="btn btn-success">Guardar</button>
+  <a href="{{ url_for('listar_eventos') }}" class="btn btn-secondary">Volver</a>
+</form>
+{% endblock %}

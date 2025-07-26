@@ -1,0 +1,9 @@
+Flask
+Flask_SQLAlchemy
+twilio
+psycopg2-binary
+apscheduler
+Flask-Login
+Flask-Bcrypt
+Flask-Mail
+email-validator

@@ -1,0 +1,64 @@
+{% extends 'base.html' %}
+{% block title %}Lista de Eventos{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <h2>🎤 Eventos Registrados</h2>
+  <a href="{{ url_for('crear_evento') }}" class="btn btn-success">
+    ➕ Nuevo Evento
+  </a>
+</div>
+
+<div class="table-responsive">
+  <table class="table table-striped table-bordered align-middle">
+    <thead class="table-dark text-center">
+      <tr>
+        <th>Nombre</th>
+        <th>Lugar</th>
+        <th>Fecha</th>
+        <th>Precios por Zona</th>
+        <th>Asientos Disponibles</th>
+        <th>Acciones</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in eventos %}
+      <tr>
+        <td><strong>{{ e.nombre }}</strong></td>
+        <td>{{ e.lugar }}</td>
+        <td>{{ e.fecha.strftime('%d/%m/%Y') }}</td>
+
+        <td>
+          {% if e.precios %}
+            <ul class="list-unstyled mb-0">
+              {% for zona, precio in e.precios.items() %}
+              <li>💺 <strong>{{ zona }}</strong>: ${{ '%.2f'|format(precio) }}</li>
+              {% endfor %}
+            </ul>
+          {% else %}
+            <span class="text-muted">No definido</span>
+          {% endif %}
+          {{ e.precios_por_zona }}
+        </td>
+
+        <td>
+          {% if e.asientos %}
+            {{ e.asientos.split(', ')|length }} asientos <br>
+            <small class="text-muted">Ej: {{ e.asientos.split(', ')[:3]|join(', ') }}{% if e.asientos.split(', ')|length > 3 %}, ...{% endif %}</small>
+          {% else %}
+            <span class="text-danger">Sin asignar</span>
+          {% endif %}
+        </td>
+
+        <td class="text-center">
+          <a href="{{ url_for('editar_evento', id=e.id) }}" class="btn btn-sm btn-warning mb-1">✏️ Editar</a>
+          <form action="{{ url_for('eliminar_evento', evento_id=e.id) }}" method="POST" onsubmit="return confirm('¿Eliminar este evento?')" style="display:inline;">
+            <button class="btn btn-sm btn-danger">🗑️ Eliminar</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

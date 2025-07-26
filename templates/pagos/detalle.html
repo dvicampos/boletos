@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+{% block title %}Detalle del Pago{% endblock %}
+{% block content %}
+<h2>🔎 Detalles del Pago</h2>
+
+<ul class="list-group">
+  <li class="list-group-item"><strong>Cliente:</strong> {{ pago.usuario.nombre }}</li>
+  <li class="list-group-item"><strong>Evento:</strong> {{ pago.evento.nombre }}</li>
+  <li class="list-group-item"><strong>Asiento:</strong> {{ pago.asiento }}</li>
+  <li class="list-group-item"><strong>Monto:</strong> ${{ "%.2f"|format(pago.monto) }}</li>
+  <li class="list-group-item"><strong>Fecha:</strong> {{ pago.fecha_pago.strftime('%d/%m/%Y %H:%M') }}</li>
+  <li class="list-group-item"><strong>Confirmado:</strong> {{ 'Sí' if pago.confirmado else 'No' }}</li>
+</ul>
+<a href="{{ url_for('listar_pagos') }}" class="btn btn-secondary mt-3">← Volver a la lista</a>
+{% endblock %}

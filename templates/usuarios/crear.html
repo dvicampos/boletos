@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+{% block title %}Registrar Usuario{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">👤 Registrar Nuevo Usuario</h2>
+
+<form method="POST" class="card p-4 shadow-sm mb-5 border border-2">
+  <div class="mb-3">
+    <label class="form-label">📱 Teléfono</label>
+    <input type="text" name="telefono" class="form-control">
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">👤 Nombre completo</label>
+    <input type="text" name="nombre" class="form-control" placeholder="Ej. Juan Pérez" required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">📍 Dirección</label>
+    <input type="text" name="direccion" class="form-control" placeholder="Ej. Calle 123, Colonia Centro" required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">🎂 Edad</label>
+    <input type="number" name="edad" class="form-control" min="1" required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">🌆 Ciudad</label>
+    <input type="text" name="ciudad" class="form-control" placeholder="Ej. CDMX, Guadalajara, etc." required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">📧 Correo electrónico</label>
+    <input type="email" name="email" class="form-control" placeholder="Ej. correo@ejemplo.com" required>
+  </div>
+
+  <div class="mb-3">
+    <label class="form-label">💳 Plan de Pago</label>
+    <select name="plan_pago" class="form-select" required>
+      <option disabled selected value="">Selecciona un plan</option>
+      <option value="semanal">Semanal</option>
+      <option value="quincenal">Quincenal</option>
+      <option value="mensual">Mensual</option>
+      <option value="contado">Contado</option>
+    </select>
+  </div>
+
+  <div class="d-grid">
+    <button class="btn btn-primary btn-lg">💾 Guardar Usuario</button>
+  </div>
+</form>
+{% endblock %}

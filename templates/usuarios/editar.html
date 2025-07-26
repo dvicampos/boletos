@@ -1,0 +1,17 @@
+{% set editar = usuario is defined %}
+<form method="POST">
+  <div class="mb-2"><label>Nombre</label><input name="nombre" class="form-control" value="{{ usuario.nombre if editar else '' }}"></div>
+  <div class="mb-2"><label>Dirección</label><input name="direccion" class="form-control" value="{{ usuario.direccion if editar else '' }}"></div>
+  <div class="mb-2"><label>Edad</label><input name="edad" type="number" class="form-control" value="{{ usuario.edad if editar else '' }}"></div>
+  <div class="mb-2"><label>Teléfono</label><input name="telefono" class="form-control" value="{{ usuario.telefono if editar else telefono }}"></div>
+  <div class="mb-2"><label>Email</label><input name="email" class="form-control" value="{{ usuario.email if editar else '' }}"></div>
+  <div class="mb-2"><label>Ciudad</label><input name="ciudad" class="form-control" value="{{ usuario.ciudad if editar else '' }}"></div>
+  <div class="mb-2"><label>Plan de Pago</label>
+    <select name="plan_pago" class="form-select">
+      <option value="contado" {% if editar and usuario.plan_pago == 'contado' %}selected{% endif %}>Contado</option>
+      <option value="mensual" {% if editar and usuario.plan_pago == 'mensual' %}selected{% endif %}>Mensual</option>
+      <option value="semanal" {% if editar and usuario.plan_pago == 'semanal' %}selected{% endif %}>Semanal</option>
+    </select>
+  </div>
+  <button class="btn btn-success">💾 {{ 'Actualizar' if editar else 'Registrar' }}</button>
+</form>

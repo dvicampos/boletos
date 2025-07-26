@@ -1,0 +1,185 @@
+{% extends 'base.html' %}
+{% block title %}🎤 Crear Nuevo Evento{% endblock %}
+
+{% block content %}
+<div class="container mt-5 mb-5">
+  <div class="bg-white p-5 shadow rounded-4 border border-light">
+    <h2 class="mb-4 text-center">🎫 {% if evento %}Editar{% else %}Nuevo{% endif %} Evento</h2>
+
+    <form method="POST" enctype="multipart/form-data">
+      <!-- Info básica -->
+      <div class="row mb-4">
+        <div class="col-md-6">
+          <label><strong>📛 Nombre del Evento</strong></label>
+          <input name="nombre" class="form-control" value="{{ evento.nombre if evento else '' }}" required>
+        </div>
+        <div class="col-md-6">
+          <label><strong>📍 Lugar</strong></label>
+          <input name="lugar" class="form-control" value="{{ evento.lugar if evento else '' }}" required>
+        </div>
+      </div>
+
+      <div class="row mb-4">
+        <!-- Incluye Leaflet -->
+        <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+        <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+
+        <div class="mb-3">
+          <label><strong>🗺️ Selecciona ubicación en el mapa</strong></label>
+          <div id="map" style="height: 300px;" class="mb-2 rounded border"></div>
+
+          <input type="hidden" name="latitud" id="latitud">
+          <input type="hidden" name="longitud" id="longitud">
+        </div>
+        <!-- Leaflet Geocoder -->
+        <link
+          rel="stylesheet"
+          href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
+        <script src="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.js"></script>
+
+        <script>
+          var map = L.map('map').setView([19.4326, -99.1332], 13); // CDMX por defecto
+
+          L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
+          }).addTo(map);
+
+          var marker;
+
+          function onMapClick(e) {
+            const { lat, lng } = e.latlng;
+
+            if (marker) {
+              marker.setLatLng(e.latlng);
+            } else {
+              marker = L.marker(e.latlng).addTo(map);
+            }
+
+            document.getElementById('latitud').value = lat;
+            document.getElementById('longitud').value = lng;
+          }
+
+          map.on('click', onMapClick);
+          L.Control.geocoder({
+  defaultMarkGeocode: false
+})
+.on('markgeocode', function(e) {
+  const latlng = e.geocode.center;
+  map.setView(latlng, 16);
+
+  if (marker) {
+    marker.setLatLng(latlng);
+  } else {
+    marker = L.marker(latlng).addTo(map);
+  }
+
+  document.getElementById('latitud').value = latlng.lat;
+  document.getElementById('longitud').value = latlng.lng;
+})
+.addTo(map);
+
+        </script>
+
+      </div>
+      <div class="row mb-4">
+        <div class="col-md-6">
+          <label><strong>📅 Fecha</strong></label>
+          <input type="date" name="fecha" class="form-control"
+            value="{{ evento.fecha.strftime('%Y-%m-%d') if evento else '' }}" required>
+        </div>
+        <div class="col-md-6">
+          <label><strong>📝 Descripción del Evento</strong></label>
+          <textarea name="descripcion" class="form-control"
+            rows="2">{{ evento.descripcion if evento else '' }}</textarea>
+        </div>
+      </div>
+
+      <hr class="my-4">
+
+      <!-- Generador de asientos -->
+      <h5 class="mb-3">🪑 Generador de Asientos</h5>
+      <div class="row mb-3">
+        <div class="col-md-6">
+          <label>Filas (ej: A,B,C)</label>
+          <input type="text" id="filas" class="form-control" placeholder="A,B,C">
+        </div>
+        <div class="col-md-6">
+          <label>Asientos por fila</label>
+          <input type="number" id="asientos_por_fila" class="form-control" placeholder="10">
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label>Resultado</label>
+        <textarea name="asientos" id="asientos" class="form-control" rows="3" readonly
+          required>{{ evento.asientos if evento else '' }}</textarea>
+      </div>
+
+      <button type="button" class="btn btn-outline-primary mb-4" onclick="generarAsientos()">🎯 Generar
+        Asientos</button>
+
+      <script>
+        function generarAsientos() {
+          const filas = document.getElementById("filas").value.split(',');
+          const num = parseInt(document.getElementById("asientos_por_fila").value);
+          let resultado = [];
+
+          for (let fila of filas) {
+            fila = fila.trim().toUpperCase();
+            for (let i = 1; i <= num; i++) {
+              resultado.push(`${fila}${i}`);
+            }
+          }
+
+          document.getElementById("asientos").value = resultado.join(', ');
+        }
+      </script>
+
+      <hr class="my-4">
+
+      <!-- Zonas y precios -->
+      <h5 class="mb-3">🎟️ Zonas y Precios</h5>
+      <div id="zonasContainer" class="mb-3">
+        <div class="zona-precio mb-2 d-flex gap-2">
+          <input name="zona[]" class="form-control" placeholder="Zona (ej: A)">
+          <input name="precio_zona[]" type="number" step="0.01" class="form-control" placeholder="Precio (ej: 150)">
+        </div>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-secondary mb-4" onclick="agregarZona()">➕ Agregar otra
+        zona</button>
+
+      <script>
+        function agregarZona() {
+          const container = document.getElementById("zonasContainer");
+          const div = document.createElement("div");
+          div.className = "zona-precio mb-2 d-flex gap-2";
+          div.innerHTML = `
+            <input name="zona[]" class="form-control" placeholder="Zona (ej: B)">
+            <input name="precio_zona[]" type="number" step="0.01" class="form-control" placeholder="Precio (ej: 120)">
+          `;
+          container.appendChild(div);
+        }
+      </script>
+
+      <hr class="my-4">
+
+      <!-- Imágenes -->
+      <div class="row mb-4">
+        <div class="col-md-6">
+          <label>🖼️ Imagen del cartel promocional</label>
+          <input type="file" name="portada" class="form-control">
+        </div>
+        <div class="col-md-6">
+          <label>🗺️ Mapa visual de asientos</label>
+          <input type="file" name="imagen_asientos" class="form-control">
+        </div>
+      </div>
+
+      <div class="text-end">
+        <button class="btn btn-success me-2">💾 Guardar Evento</button>
+        <a href="{{ url_for('listar_eventos') }}" class="btn btn-outline-secondary">⬅️ Volver</a>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

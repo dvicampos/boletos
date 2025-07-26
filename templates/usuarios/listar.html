@@ -1,0 +1,23 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>👥 Lista de Usuarios</h2>
+<a href="{{ url_for('registrar_usuario') }}" class="btn btn-primary mb-3">➕ Nuevo Usuario</a>
+<table class="table table-bordered table-striped">
+  <thead><tr><th>Nombre</th><th>Teléfono</th><th>Plan</th><th>Acciones</th></tr></thead>
+  <tbody>
+    {% for u in usuarios %}
+    <tr>
+      <td>{{ u.nombre }}</td>
+      <td>{{ u.telefono }}</td>
+      <td>{{ u.plan_pago }}</td>
+      <td>
+        <a href="{{ url_for('editar_usuario', id=u.id) }}" class="btn btn-sm btn-warning">✏️</a>
+        <form action="{{ url_for('eliminar_usuario', id=u.id) }}" method="POST" class="d-inline" onsubmit="return confirm('¿Seguro?')">
+          <button class="btn btn-sm btn-danger">🗑️</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
