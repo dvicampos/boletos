@@ -76,7 +76,7 @@
   {% if evento.imagen_asientos %}
   <div class="mb-4 text-center">
     <label class="form-label"><strong>🗺️ Mapa de Asientos</strong></label><br>
-    <img src="{{ evento.imagen_asientos }}" alt="Mapa de asientos" class="img-fluid rounded border"
+    <img src="{{ url_for('static', filename='uploads/' ~ evento.imagen_asientos) }}" alt="Mapa de asientos" class="img-fluid rounded border"
       style="max-height:400px;">
   </div>
   {% endif %}

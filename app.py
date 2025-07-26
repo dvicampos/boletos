@@ -530,52 +530,6 @@ def ver_evento(evento_id):
 
     return render_template("eventos/ver_evento.html", evento=evento, zonas=zonas, asientos=asientos)
 
-# @app.route("/eventos/nuevo", methods=["GET", "POST"])
-# @login_required
-# def crear_evento():
-#     if request.method == "POST":
-#         nombre = request.form['nombre']
-#         lugar = request.form['lugar']
-#         fecha = datetime.strptime(request.form['fecha'], "%Y-%m-%d")
-#         asientos = request.form['asientos']
-
-#         # Subida de imagen
-#         imagen_file = request.files.get('imagen_asientos')
-#         imagen_path = None
-#         if imagen_file and allowed_file(imagen_file.filename):
-#             filename = secure_filename(imagen_file.filename)
-#             filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-#             imagen_file.save(filepath)
-#             imagen_path = f"/static/uploads/{filename}"
-
-#         # Precios por zona
-#         zonas = request.form.getlist('zona[]')
-#         precios = request.form.getlist('precio_zona[]')
-#         precios_dict = {}
-
-#         for zona, p in zip(zonas, precios):
-#             zona = zona.strip().upper()
-#             try:
-#                 precios_dict[zona] = float(p)
-#             except ValueError:
-#                 continue  # Ignorar precios inválidos
-
-#         evento = Evento(
-#             nombre=nombre,
-#             lugar=lugar,
-#             fecha=fecha,
-#             asientos=asientos,
-#             imagen_asientos=imagen_path,
-#             precios_por_zona=json.dumps(precios_dict)
-#         )
-
-#         db.session.add(evento)
-#         db.session.commit()
-#         flash("✅ Evento creado correctamente.")
-#         return redirect(url_for("listar_eventos"))
-
-#     return render_template("eventos/nuevo.html")
-
 @app.route("/eventos/editar/<int:id>", methods=["GET", "POST"])
 @login_required
 def editar_evento(id):

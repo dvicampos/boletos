@@ -56,7 +56,7 @@ def enviar_recordatorios(app):
 
 def iniciar_scheduler(app):
     scheduler = BackgroundScheduler()
-    scheduler.add_job(func=lambda: enviar_recordatorios(app), trigger="cron", hour=19, minute=8)  # Ajusta la hora aquí
+    scheduler.add_job(func=lambda: enviar_recordatorios(app), trigger="cron", hour=12, minute=19)  # Ajusta la hora aquí
     scheduler.start()
     print("📅 Scheduler iniciado para enviar recordatorios diarios.")
 
