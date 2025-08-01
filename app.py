@@ -1,6 +1,6 @@
 from flask import Flask, render_template, request, redirect
 from db import init_db
-from models import db, Usuario, Evento, Pago, Recordatorio, PlanParcialidad
+from models import db, Usuario, Evento, Pago, Recordatorio
 from whatsapp_bot import bot_bp
 from reminders import iniciar_scheduler
 from flask_login import LoginManager
@@ -19,11 +19,6 @@ from datetime import datetime, timedelta
 from sqlalchemy import text
 from datetime import date
 from datetime import datetime
-from flask import request, send_file
-from sqlalchemy import func, and_, or_
-from datetime import date, timedelta, datetime
-import pandas as pd
-import io
 
 login_manager = LoginManager()
 mail = Mail()
@@ -75,7 +70,6 @@ app.jinja_env.filters['cargar_json'] = lambda val: json.loads(val or "{}")
 def registrar_pagos():
     eventos = Evento.query.all()
     usuarios = Usuario.query.order_by(Usuario.nombre).all()
-    planes = PlanParcialidad.query.all()
     telefono_prellenado = request.args.get('telefono', '')
 
     if request.method == 'POST':
@@ -84,19 +78,32 @@ def registrar_pagos():
         monto = request.form.get('monto')
         abonado = request.form.get('abonado')
         asientos_seleccionados = request.form.getlist('asientos')
-        plan_id = request.form.get('plan_parcialidad_id')  # NUEVO
+        tipo_pago = request.form.get("tipo_pago")
+        parcialidad = request.form.get("parcialidad")
         notas = request.form.get("notas")
         evento = Evento.query.get(int(evento_id)) if evento_id else None
-        plan = PlanParcialidad.query.get(plan_id) if plan_id else None
+
+        # Analiza parcialidad tipo "1 de 4"
+        parcialidad_total = int(parcialidad.split('de')[1].strip()) if parcialidad and 'de' in parcialidad else 1
 
         try:
             abonado_float = float(abonado)
-            monto_float = float(monto)
         except (ValueError, TypeError):
             abonado_float = 0.0
+
+        try:
+            monto_float = float(monto)
+        except (ValueError, TypeError):
             monto_float = 0.0
 
-        estatus = 'liquidado' if abonado_float >= monto_float else 'parcial' if abonado_float > 0 else 'pendiente'
+        # Luego úsalo con seguridad
+        if abonado_float >= monto_float:
+            estatus = 'liquidado'
+        elif abonado_float > 0:
+            estatus = 'parcial'
+        else:
+            estatus = 'pendiente'
+
 
         errores = []
         if not telefono:
@@ -111,7 +118,7 @@ def registrar_pagos():
         if errores:
             for e in errores:
                 flash(e)
-            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono, planes=planes)
+            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono)
 
         usuario = Usuario.query.filter_by(telefono=telefono).first()
         if not usuario:
@@ -121,83 +128,65 @@ def registrar_pagos():
         disponibles = evento.asientos.split(', ')
         if not all(a in disponibles for a in asientos_seleccionados):
             flash("❌ Uno o más asientos ya no están disponibles.")
-            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono, planes=planes)
+            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono)
 
         monto_total = float(monto)
-        pago_unitario_total = monto_total / len(asientos_seleccionados)
+        pago_unitario = monto_total / len(asientos_seleccionados)
 
-        recordatorios_generados = []
-
-        # 🧾 Crear pagos con o sin plan
         for asiento in asientos_seleccionados:
-            if plan and plan.numero_parcialidades > 1:
-                monto_con_comision = pago_unitario_total * (1 + plan.porcentaje_comision) if plan.incluye_comision else pago_unitario_total
-
-                for i in range(plan.numero_parcialidades):
-                    fecha_pago = datetime.now() + timedelta(days=i * plan.dias_entre_pagos)
-                    pago = Pago(
-                        usuario_id=usuario.id,
-                        evento_id=evento.id,
-                        asiento=asiento,
-                        fecha_pago=fecha_pago,
-                        monto=round(monto_con_comision, 2),
-                        abonado=(abonado_float / len(asientos_seleccionados)) if i == 0 else 0,
-                        confirmado=(i == 0),
-                        tipo_pago=plan.tipo,
-                        parcialidad=f"{i+1} de {plan.numero_parcialidades}",
-                        notas=notas if i == 0 else "",
-                        estatus_pago='parcial' if i == 0 else 'pendiente',
-                        plan_parcialidad_id=plan.id,
-                        numero_parcialidad=i+1,
-                        total_parcialidades=plan.numero_parcialidades
-                    )
-                    db.session.add(pago)
-
-                    if i == 0:
-                        disponibles.remove(asiento)
-
-                    if i > 0:
-                        fecha_r = fecha_pago.date()
-                        recordatorios_generados.append((fecha_r, monto_con_comision))
-                        db.session.add(Recordatorio(
-                            usuario_id=usuario.id,
-                            evento_id=evento.id,
-                            fecha_recordatorio=fecha_r,
-                            tipo="pago",
-                            enviado=False,
-                            notas=f"Pago {i+1} de {plan.numero_parcialidades} - Monto ${monto_con_comision:.2f}"
-                        ))
-            else:
-                pago = Pago(
-                    usuario_id=usuario.id,
-                    evento_id=evento.id,
-                    asiento=asiento,
-                    fecha_pago=datetime.now(),
-                    monto=pago_unitario_total,
-                    abonado=abonado_float / len(asientos_seleccionados),
-                    confirmado=True,
-                    tipo_pago='contado',
-                    parcialidad='1 de 1',
-                    notas=notas,
-                    estatus_pago=estatus,
-                    numero_parcialidad=1,
-                    total_parcialidades=1
-                )
-                db.session.add(pago)
-                disponibles.remove(asiento)
+            pago = Pago(
+                usuario_id=usuario.id,
+                evento_id=evento.id,
+                asiento=asiento,
+                fecha_pago=datetime.now(),
+                monto=pago_unitario,
+                abonado=float(abonado) / len(asientos_seleccionados),
+                confirmado=True,
+                tipo_pago=tipo_pago or "contado",
+                parcialidad=parcialidad,
+                notas=notas,
+                estatus_pago=estatus,
+            )
+            db.session.add(pago)
+            disponibles.remove(asiento)
 
         evento.asientos = ', '.join(disponibles)
         db.session.commit()
 
-        # ✅ Verificar si ya liquidó
+        # Verificar si ya liquidó
         pagos_usuario = Pago.query.filter_by(usuario_id=usuario.id, evento_id=evento.id).all()
         total_abonado = sum(p.abonado for p in pagos_usuario)
+
         if total_abonado >= monto_total:
             for p in pagos_usuario:
                 p.estatus_pago = 'liquidado'
             db.session.commit()
 
-        # 📅 Recordatorio antes del evento
+        # Lógica de recordatorios
+        recordatorios_generados = []
+        if tipo_pago == 'mensual':
+            dias_entre_pagos = 30
+        elif tipo_pago == 'semanal':
+            dias_entre_pagos = 7
+        else:
+            dias_entre_pagos = 0
+
+        if parcialidad_total > 1:
+            pago_parcial = monto_total / parcialidad_total
+            for i in range(1, parcialidad_total):  # ya pagó la primera
+                fecha_r = datetime.now().date() + timedelta(days=i * dias_entre_pagos)
+                r = Recordatorio(
+                    usuario_id=usuario.id,
+                    evento_id=evento.id,
+                    fecha_recordatorio=fecha_r,
+                    tipo="pago",
+                    enviado=False,
+                    notas=f"Pago {i+1} de {parcialidad_total} - Monto ${pago_parcial:.2f}"
+                )
+                db.session.add(r)
+                recordatorios_generados.append((fecha_r, pago_parcial))
+
+        # Recordatorio antes del evento
         recordatorio_evento = Recordatorio(
             usuario_id=usuario.id,
             evento_id=evento.id,
@@ -208,19 +197,21 @@ def registrar_pagos():
         db.session.add(recordatorio_evento)
         db.session.commit()
 
-        # 📲 WhatsApp resumen
+        # Mensaje resumen por WhatsApp
         try:
             mensaje_resumen = f"🎟️ *Resumen de tu compra para {evento.nombre}*\n"
             mensaje_resumen += f"👤 {usuario.nombre}\n"
             mensaje_resumen += f"🎫 Asientos: {', '.join(asientos_seleccionados)}\n"
             mensaje_resumen += f"💰 Monto total: ${monto_total:.2f}\n"
-            mensaje_resumen += f"📅 Tipo de pago: *{plan.nombre if plan else 'Contado'}*\n"
-            mensaje_resumen += f"💸 Abonado: ${abonado_float:.2f}\n"
+            mensaje_resumen += f"📅 Tipo de pago: *{tipo_pago or 'contado'}*\n"
+            mensaje_resumen += f"💵 Total: ${monto_total:.2f}\n"
+            mensaje_resumen += f"💸 Abonado: ${float(abonado):.2f}\n"
+            mensaje_resumen += f"📅 Tipo de pago: *{tipo_pago or 'contado'}*\n"
 
             if recordatorios_generados:
-                mensaje_resumen += "\n📅 Próximos pagos:\n"
-                for fecha, monto in recordatorios_generados:
-                    mensaje_resumen += f"• {fecha.strftime('%d/%m/%Y')} → ${monto:.2f}\n"
+                mensaje_resumen += "\n🗖️ Próximos pagos:\n"
+                for fecha, pago in recordatorios_generados:
+                    mensaje_resumen += f"• {fecha.strftime('%d/%m/%Y')} → ${pago:.2f}\n"
 
             mensaje_resumen += "\n✅ ¡Gracias por tu compra! Recibirás recordatorios automáticos."
             enviar_whatsapp(usuario.telefono, mensaje_resumen)
@@ -236,10 +227,8 @@ def registrar_pagos():
         eventos=eventos,
         evento=None,
         usuarios=usuarios,
-        telefono=telefono_prellenado,
-        planes=planes
+        telefono=telefono_prellenado
     )
-
 
 @app.route('/pagos/listar')
 @login_required
@@ -589,63 +578,6 @@ def eliminar_evento(evento_id):
     flash('🎤 Evento eliminado correctamente.')
     return redirect(url_for('listar_eventos'))
 
-
-# ----------------------------
-# CRUD DE PLANES DE PARCIALIDAD
-# ----------------------------
-
-@app.route("/planes", methods=["GET"])
-@login_required
-def listar_planes():
-    planes = PlanParcialidad.query.all()
-    return render_template("planes/listar.html", planes=planes)
-
-@app.route("/planes/nuevo", methods=["GET", "POST"])
-@login_required
-def crear_plan():
-    if request.method == "POST":
-        nuevo = PlanParcialidad(
-            nombre=request.form["nombre"],
-            tipo=request.form["tipo"],
-            numero_parcialidades=int(request.form["numero_parcialidades"]),
-            dias_entre_pagos=int(request.form["dias_entre_pagos"]),
-            incluye_comision='incluye_comision' in request.form,
-            porcentaje_comision=float(request.form.get("porcentaje_comision", 0)),
-            descripcion=request.form.get("descripcion", "")
-        )
-        db.session.add(nuevo)
-        db.session.commit()
-        flash("✅ Plan creado correctamente.")
-        return redirect(url_for("listar_planes"))
-    return render_template("planes/nuevo.html")
-
-@app.route("/planes/editar/<int:id>", methods=["GET", "POST"])
-@login_required
-def editar_plan(id):
-    plan = PlanParcialidad.query.get_or_404(id)
-    if request.method == "POST":
-        plan.nombre = request.form["nombre"]
-        plan.tipo = request.form["tipo"]
-        plan.numero_parcialidades = int(request.form["numero_parcialidades"])
-        plan.dias_entre_pagos = int(request.form["dias_entre_pagos"])
-        plan.incluye_comision = 'incluye_comision' in request.form
-        plan.porcentaje_comision = float(request.form.get("porcentaje_comision", 0))
-        plan.descripcion = request.form.get("descripcion", "")
-        db.session.commit()
-        flash("✅ Plan actualizado.")
-        return redirect(url_for("listar_planes"))
-    return render_template("planes/editar.html", plan=plan)
-
-@app.route("/planes/eliminar/<int:id>", methods=["POST"])
-@login_required
-def eliminar_plan(id):
-    plan = PlanParcialidad.query.get_or_404(id)
-    db.session.delete(plan)
-    db.session.commit()
-    flash("🗑️ Plan eliminado.")
-    return redirect(url_for("listar_planes"))
-
-
 from flask import request, send_file
 from sqlalchemy import func, and_, or_
 from datetime import date, timedelta, datetime
@@ -771,6 +703,7 @@ def dashboard():
                            filtro=filtro,
                            fecha_inicio=fecha_inicio,
                            fecha_fin=fecha_fin)
+
 
 iniciar_scheduler(app)
 app.register_blueprint(bot_bp)
