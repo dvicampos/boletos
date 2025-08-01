@@ -1,60 +1,229 @@
 {% extends 'base.html' %}
 {% block content %}
-<h3 class="mt-5">📌 Pagos Pendientes</h3>
-{% if pendientes %}
-<table class="table table-bordered table-striped mt-3">
-    <thead class="table-dark">
+<div class="container my-5">
+
+  <h1 class="mb-5 text-center fw-bold">📊 Dashboard de Pagos y Eventos</h1>
+
+  <!-- 🎯 Filtros + Excel + Reset -->
+  <form class="row gy-3 gx-3 align-items-end mb-4" method="GET">
+    <div class="col-md-3">
+      <label class="form-label fw-bold">📌 Filtro rápido</label>
+      <select name="filtro" class="form-select" onchange="this.form.submit()">
+        <option value="hoy" {% if filtro == 'hoy' %}selected{% endif %}>Hoy</option>
+        <option value="semana" {% if filtro == 'semana' %}selected{% endif %}>Últimos 7 días</option>
+        <option value="mes" {% if filtro == 'mes' %}selected{% endif %}>Este mes</option>
+        <option value="rango" {% if filtro == 'rango' %}selected{% endif %}>Rango personalizado</option>
+      </select>
+    </div>
+
+    {% if filtro == 'rango' %}
+    <div class="col-md-3">
+      <label class="form-label fw-bold">Desde</label>
+      <input type="date" name="inicio" class="form-control" value="{{ request.args.get('inicio') or '' }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label fw-bold">Hasta</label>
+      <input type="date" name="fin" class="form-control" value="{{ request.args.get('fin') or '' }}">
+    </div>
+    <div class="col-md-3 d-grid">
+      <button type="submit" class="btn btn-dark mt-1">🔍 Aplicar Filtro</button>
+    </div>
+    {% endif %}
+
+    <div class="col-md-3 d-grid">
+      <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary mt-1">❌ Quitar Filtros</a>
+    </div>
+    <div class="col-md-3 d-grid">
+      <a href="{{ url_for('dashboard', filtro=filtro, inicio=request.args.get('inicio'), fin=request.args.get('fin'), excel=1) }}" class="btn btn-success mt-1">
+        📥 Exportar a Excel
+      </a>
+    </div>
+  </form>
+
+  <!-- KPIs -->
+  <div class="row text-center mb-5">
+    <div class="col-md-4">
+      <div class="card shadow border-success">
+        <div class="card-body">
+          <h5 class="card-title">💰 Total Ganado</h5>
+          <p class="display-6 fw-bold text-success">${{ total_ganado }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow border-primary">
+        <div class="card-body">
+          <h5 class="card-title">📅 Proyectado (7 días)</h5>
+          <p class="display-6 fw-bold text-primary">${{ pagos_proximos }}</p>
+        </div>
+      </div>
+    </div>
+    <div class="col-md-4">
+      <div class="card shadow border-danger">
+        <div class="card-body">
+          <h5 class="card-title">🔔 Pagos vencidos</h5>
+          {% if pagos_vencidos|length > 0 %}
+            <p class="display-6 fw-bold text-danger">{{ pagos_vencidos|length }}</p>
+            <div class="alert alert-danger mt-3">⚠ Hay clientes con pagos vencidos</div>
+          {% else %}
+            <p class="display-6 text-muted">0</p>
+            <div class="alert alert-success mt-3">Todo al día 🙌</div>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP CLIENTES -->
+  <h3 class="mt-5">⭐ Top 5 Clientes por Abonos</h3>
+  {% if top_clientes %}
+  <div class="table-responsive">
+    <table class="table table-hover table-striped">
+      <thead class="table-dark">
         <tr>
-            <th>Cliente</th>
-            <th>Teléfono</th>
-            <th>Evento</th>
-            <th>Fecha que debía pagar</th>
+          <th>Cliente</th>
+          <th>Teléfono</th>
+          <th>Total Abonado</th>
         </tr>
-    </thead>
-    <tbody>
-        {% for p in pendientes %}
+      </thead>
+      <tbody>
+        {% for c in top_clientes %}
         <tr>
-            <td>{{ p.nombre }}</td>
-            <td>{{ p.telefono }}</td>
-            <td>{{ p.evento }}</td>
-            <td>{{ p.fecha_recordatorio.strftime('%d/%m/%Y') }}</td>
+          <td>{{ c.nombre }}</td>
+          <td>{{ c.telefono }}</td>
+          <td>${{ c.total_abonado }}</td>
         </tr>
         {% endfor %}
-    </tbody>
-</table>
-{% else %}
-<p class="text-muted">No hay pagos pendientes hasta hoy 🙌</p>
-{% endif %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">Aún no hay datos.</p>
+  {% endif %}
 
-<h1>📊 Dashboard de Pagos y Recordatorios</h1>
+  <!-- Pagos vencidos -->
+  <h3 class="mt-5">📌 Pagos Vencidos por Evento Pasado</h3>
+  {% if pagos_vencidos %}
+  <div class="table-responsive">
+    <table class="table table-bordered table-striped">
+      <thead class="table-dark">
+        <tr>
+          <th>Cliente</th>
+          <th>Teléfono</th>
+          <th>Evento</th>
+          <th>Fecha del Evento</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in pagos_vencidos %}
+        <tr>
+          <td>{{ p.nombre }}</td>
+          <td>{{ p.telefono }}</td>
+          <td>{{ p.evento }}</td>
+          <td>{{ p.fecha.strftime('%d/%m/%Y') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">No hay pagos vencidos por evento pasado.</p>
+  {% endif %}
 
-<div id="grafica_recordatorios" style="width:100%;height:400px;"></div>
-<div id="grafica_pagos" style="width:100%;height:400px;"></div>
+  <!-- Eventos no liquidados -->
+  <h3 class="mt-5">❌ Eventos No Liquidados</h3>
+  {% if eventos_no_liquidados %}
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead class="table-dark">
+        <tr>
+          <th>Evento</th>
+          <th>Pagos Pendientes</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in eventos_no_liquidados %}
+        <tr>
+          <td>{{ e.nombre }}</td>
+          <td>{{ e.pendientes }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">Todos los eventos han sido liquidados 🎉</p>
+  {% endif %}
 
+  <!-- Boletos vendidos -->
+  <h3 class="mt-5">🎟️ Boletos Vendidos por Evento</h3>
+  {% if boletos_vendidos %}
+  <div class="table-responsive">
+    <table class="table table-striped">
+      <thead class="table-dark">
+        <tr>
+          <th>Evento</th>
+          <th>Boletos Vendidos</th>
+          <th>Total Abonado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for b in boletos_vendidos %}
+        <tr>
+          <td>{{ b.nombre }}</td>
+          <td>{{ b.boletos }}</td>
+          <td>${{ b.total }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted">Aún no hay boletos vendidos.</p>
+  {% endif %}
+
+  <!-- GRÁFICAS -->
+  <h3 class="mt-5">📈 Gráficas</h3>
+  <div class="row">
+    <div class="col-md-6 mb-4">
+      <div id="grafica_recordatorios" style="height:400px;"></div>
+    </div>
+    <div class="col-md-6 mb-4">
+      <div id="grafica_pagos" style="height:400px;"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- PLOTLY -->
+<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
 <script>
-    // 📩 Recordatorios
-    var recordatorios = {
-        x: {{ recordatorios| map(attribute = 0) | list | tojson }},
-    y: { { recordatorios | map(attribute = 2) | list | tojson } },
+  var recordatorios = {
+    x: {{ recordatorios | map(attribute=0) | list | tojson }},
+    y: {{ recordatorios | map(attribute=2) | list | tojson }},
     type: 'bar',
-        marker: { color: { { recordatorios | map(attribute = 1) | list | map('int') | list | tojson } } },
-    text: { { recordatorios | map(attribute = 1) | list | tojson } },
-        };
-    Plotly.newPlot('grafica_recordatorios', [recordatorios], {
-        title: 'Recordatorios Enviados vs Pendientes'
-    });
+    text: {{ recordatorios | map(attribute=1) | list | tojson }},
+    marker: {
+      color: {{ recordatorios | map(attribute=1) | list | map('int') | list | tojson }}
+    }
+  };
+  Plotly.newPlot('grafica_recordatorios', [recordatorios], {
+    title: 'Recordatorios Enviados vs Pendientes',
+    xaxis: { title: 'Tipo' },
+    yaxis: { title: 'Cantidad' }
+  });
 
-    // 💰 Pagos
-    var pagos = {
-        x: {{ pagos| map(attribute = 0) | list | tojson }},
-    y: { { pagos | map(attribute = 1) | list | tojson } },
+  var pagos = {
+    x: {{ pagos_por_mes | map(attribute=0) | list | tojson }},
+    y: {{ pagos_por_mes | map(attribute=1) | list | tojson }},
     type: 'scatter',
-        mode: 'lines+markers',
-            line: { shape: 'linear' }
-        };
-    Plotly.newPlot('grafica_pagos', [pagos], {
-        title: 'Ingresos por Mes'
-    });
+    mode: 'lines+markers',
+    line: { shape: 'linear' }
+  };
+  Plotly.newPlot('grafica_pagos', [pagos], {
+    title: 'Ingresos Confirmados por Mes',
+    xaxis: { title: 'Mes' },
+    yaxis: { title: 'Total ($)' }
+  });
 </script>
-
 {% endblock %}

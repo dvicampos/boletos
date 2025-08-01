@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>📊 Planes de parcialidad</h2>
+<a href="{{ url_for('crear_plan') }}" class="btn btn-success mb-3">➕ Nuevo plan</a>
+
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Nombre</th>
+      <th>Tipo</th>
+      <th># Pagos</th>
+      <th>Días</th>
+      <th>Comisión</th>
+      <th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for p in planes %}
+    <tr>
+      <td>{{ p.nombre }}</td>
+      <td>{{ p.tipo }}</td>
+      <td>{{ p.numero_parcialidades }}</td>
+      <td>{{ p.dias_entre_pagos }}</td>
+      <td>{% if p.incluye_comision %}{{ p.porcentaje_comision * 100 }}%{% else %}No{% endif %}</td>
+      <td>
+        <a href="{{ url_for('editar_plan', id=p.id) }}" class="btn btn-sm btn-primary">✏️ Editar</a>
+        <form action="{{ url_for('eliminar_plan', id=p.id) }}" method="POST" style="display:inline-block;" onsubmit="return confirm('¿Eliminar este plan?')">
+          <button type="submit" class="btn btn-sm btn-danger">🗑️</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

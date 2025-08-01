@@ -11,6 +11,7 @@
       <th>Concierto</th>
       <th>Asiento</th>
       <th>Monto</th>
+      <th>Abonado</th>
       <th>Fecha</th>
       <th>Acciones</th>
     </tr>
@@ -23,6 +24,7 @@
         <td>{{ pago.evento.nombre }}</td>
         <td>{{ pago.asiento }}</td>
         <td>${{ "%.2f"|format(pago.monto) }}</td>
+        <td>${{ "%.2f"|format(pago.abonado) }}</td>
         <td>{{ pago.fecha_pago.strftime('%d/%m/%Y %H:%M') }}</td>
         <td>
           <a href="{{ url_for('detalle_pago', pago_id=pago.id) }}" class="btn btn-info btn-sm">🔍</a>
