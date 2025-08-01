@@ -587,7 +587,6 @@ import io
 @app.route('/dashboard', methods=['GET'])
 @login_required
 def dashboard():
-    # Filtros
     filtro = request.args.get('filtro', 'hoy')
     inicio = request.args.get('inicio')
     fin = request.args.get('fin')
