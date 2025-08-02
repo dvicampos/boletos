@@ -5,7 +5,7 @@ from whatsapp_bot import bot_bp
 from reminders import iniciar_scheduler
 from flask_login import LoginManager
 from flask_mail import Mail
-from models import AdminUser
+from models import AdminUser, PlanPago, MetodoPago
 from flask import session, flash, url_for, render_template
 from flask_login import login_user, logout_user, login_required, current_user
 from flask_mail import Message
@@ -35,6 +35,9 @@ app.config['MAIL_PORT'] = 587
 app.config['MAIL_USE_TLS'] = True
 app.config['MAIL_USERNAME'] = 'dvicamp@gmail.com'
 app.config['MAIL_PASSWORD'] = 'pwsd gwrz lzdi cyzv'
+app.config['MAIL_DEFAULT_SENDER'] = 'dvicamp@gmail.com'
+
+mail = Mail(app)
 
 # twilio
 app.config['TWILIO_ACCOUNT_SID'] = 'AC411c94cb166377f45f82a2898d28a173'
@@ -70,6 +73,8 @@ app.jinja_env.filters['cargar_json'] = lambda val: json.loads(val or "{}")
 def registrar_pagos():
     eventos = Evento.query.all()
     usuarios = Usuario.query.order_by(Usuario.nombre).all()
+    planes_pago = PlanPago.query.all()
+    metodos_pago = MetodoPago.query.order_by(MetodoPago.nombre).all()
     telefono_prellenado = request.args.get('telefono', '')
 
     if request.method == 'POST':
@@ -80,11 +85,37 @@ def registrar_pagos():
         asientos_seleccionados = request.form.getlist('asientos')
         tipo_pago = request.form.get("tipo_pago")
         parcialidad = request.form.get("parcialidad")
-        notas = request.form.get("notas")
+        metodo_pago_id = request.form.get("notas")
+        metodo = None
+        notas = "Sin método"
+        print(MetodoPago.query.all())
+        if metodo_pago_id:
+            try:
+                metodo = MetodoPago.query.get(int(metodo_pago_id))
+                if metodo:
+                    notas = f"{metodo.nombre} - Comisión {metodo.porcentaje_comision:.2f}%"
+            except ValueError:
+                pass  # por si llega algo inválido como ''
+        plan_pago_id = request.form.get("plan_pago_id")  # 🆕 nuevo campo desde el form
+
         evento = Evento.query.get(int(evento_id)) if evento_id else None
 
-        # Analiza parcialidad tipo "1 de 4"
-        parcialidad_total = int(parcialidad.split('de')[1].strip()) if parcialidad and 'de' in parcialidad else 1
+        # 🧠 Si se seleccionó plan, sobreescribimos tipo_pago y parcialidad
+        plan = PlanPago.query.get(plan_pago_id) if plan_pago_id else None
+        if plan:
+            tipo_pago = plan.nombre
+            parcialidad_total = plan.cantidad_pagos
+            dias_entre_pagos = plan.dias_entre_pagos
+            parcialidad = f"1 de {parcialidad_total}"
+        else:
+            # si no hay plan, usar lo del form
+            parcialidad_total = int(parcialidad.split('de')[1].strip()) if parcialidad and 'de' in parcialidad else 1
+            if tipo_pago == 'mensual':
+                dias_entre_pagos = 30
+            elif tipo_pago == 'semanal':
+                dias_entre_pagos = 7
+            else:
+                dias_entre_pagos = 0
 
         try:
             abonado_float = float(abonado)
@@ -95,15 +126,13 @@ def registrar_pagos():
             monto_float = float(monto)
         except (ValueError, TypeError):
             monto_float = 0.0
+        
+        comision = 0
+        if metodo and metodo.porcentaje_comision > 0:
+            comision = monto_float * (metodo.porcentaje_comision / 100)
+            monto_float += comision
 
-        # Luego úsalo con seguridad
-        if abonado_float >= monto_float:
-            estatus = 'liquidado'
-        elif abonado_float > 0:
-            estatus = 'parcial'
-        else:
-            estatus = 'pendiente'
-
+        estatus = 'liquidado' if abonado_float >= monto_float else 'parcial' if abonado_float > 0 else 'pendiente'
 
         errores = []
         if not telefono:
@@ -118,7 +147,7 @@ def registrar_pagos():
         if errores:
             for e in errores:
                 flash(e)
-            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono)
+            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono, planes_pago=planes_pago, metodos_pago=metodos_pago)
 
         usuario = Usuario.query.filter_by(telefono=telefono).first()
         if not usuario:
@@ -128,9 +157,11 @@ def registrar_pagos():
         disponibles = evento.asientos.split(', ')
         if not all(a in disponibles for a in asientos_seleccionados):
             flash("❌ Uno o más asientos ya no están disponibles.")
-            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono)
+            return render_template('pagos/pagos.html', eventos=eventos, evento=evento, usuarios=usuarios, telefono=telefono, planes_pago=planes_pago, metodos_pago=metodos_pago)
 
-        monto_total = float(monto)
+        # monto_total = float(monto)
+        monto_total = monto_float
+
         pago_unitario = monto_total / len(asientos_seleccionados)
 
         for asiento in asientos_seleccionados:
@@ -162,18 +193,11 @@ def registrar_pagos():
                 p.estatus_pago = 'liquidado'
             db.session.commit()
 
-        # Lógica de recordatorios
+        # Recordatorios automáticos
         recordatorios_generados = []
-        if tipo_pago == 'mensual':
-            dias_entre_pagos = 30
-        elif tipo_pago == 'semanal':
-            dias_entre_pagos = 7
-        else:
-            dias_entre_pagos = 0
-
         if parcialidad_total > 1:
             pago_parcial = monto_total / parcialidad_total
-            for i in range(1, parcialidad_total):  # ya pagó la primera
+            for i in range(1, parcialidad_total):
                 fecha_r = datetime.now().date() + timedelta(days=i * dias_entre_pagos)
                 r = Recordatorio(
                     usuario_id=usuario.id,
@@ -197,19 +221,19 @@ def registrar_pagos():
         db.session.add(recordatorio_evento)
         db.session.commit()
 
-        # Mensaje resumen por WhatsApp
+        # WhatsApp resumen
         try:
             mensaje_resumen = f"🎟️ *Resumen de tu compra para {evento.nombre}*\n"
             mensaje_resumen += f"👤 {usuario.nombre}\n"
             mensaje_resumen += f"🎫 Asientos: {', '.join(asientos_seleccionados)}\n"
             mensaje_resumen += f"💰 Monto total: ${monto_total:.2f}\n"
+            if comision > 0:
+                mensaje_resumen += f"💳 Comisión incluida ({metodo.porcentaje_comision:.2f}%): ${comision:.2f}\n"
             mensaje_resumen += f"📅 Tipo de pago: *{tipo_pago or 'contado'}*\n"
-            mensaje_resumen += f"💵 Total: ${monto_total:.2f}\n"
             mensaje_resumen += f"💸 Abonado: ${float(abonado):.2f}\n"
-            mensaje_resumen += f"📅 Tipo de pago: *{tipo_pago or 'contado'}*\n"
 
             if recordatorios_generados:
-                mensaje_resumen += "\n🗖️ Próximos pagos:\n"
+                mensaje_resumen += "\n📅 Próximos pagos:\n"
                 for fecha, pago in recordatorios_generados:
                     mensaje_resumen += f"• {fecha.strftime('%d/%m/%Y')} → ${pago:.2f}\n"
 
@@ -218,6 +242,32 @@ def registrar_pagos():
 
         except Exception as e:
             print("❌ Error al enviar resumen por WhatsApp:", e)
+        
+        # Enviar correo de confirmación
+        try:
+            if usuario.email:
+                cuerpo_html = render_template("emails/confirmacion_pago.html",
+                    usuario=usuario,
+                    evento=evento,
+                    asientos=asientos_seleccionados,
+                    monto_total=float(monto_total),
+                    abonado=float(abonado),
+                    tipo_pago=tipo_pago,
+                    comision=float(comision),
+                    metodo=metodo,
+                    recordatorios=recordatorios_generados
+                )
+
+                msg = Message(
+                    subject=f"🎟️ Confirmación de Pago - {evento.nombre}",
+                    recipients=[usuario.email],
+                    html=cuerpo_html
+                )
+                mail.send(msg)
+        except Exception as e:
+            print("❌ Error al enviar correo:", e)
+
+
 
         flash(f"✅ Pago registrado para {len(asientos_seleccionados)} asiento(s).")
         return redirect(url_for('registrar_pagos'))
@@ -227,7 +277,9 @@ def registrar_pagos():
         eventos=eventos,
         evento=None,
         usuarios=usuarios,
-        telefono=telefono_prellenado
+        telefono=telefono_prellenado,
+        metodos_pago=metodos_pago,
+        planes_pago=planes_pago
     )
 
 @app.route('/pagos/listar')
@@ -703,6 +755,100 @@ def dashboard():
                            fecha_inicio=fecha_inicio,
                            fecha_fin=fecha_fin)
 
+
+# *********************************************************************************************
+# PAGOS 
+# *********************************************************************************************
+
+@app.route("/planes-pago")
+@login_required
+def listar_planes_pago():
+    planes = PlanPago.query.order_by(PlanPago.nombre).all()
+    return render_template("planes_pago/listar.html", planes=planes)
+
+@app.route("/planes-pago/nuevo", methods=["GET", "POST"])
+@login_required
+def crear_plan_pago():
+    if request.method == "POST":
+        nombre = request.form["nombre"]
+        cantidad = int(request.form["cantidad_pagos"])
+        dias = int(request.form["dias_entre_pagos"])
+        notas = request.form.get("notas", "")
+
+        nuevo = PlanPago(nombre=nombre, cantidad_pagos=cantidad, dias_entre_pagos=dias, notas=notas)
+        db.session.add(nuevo)
+        db.session.commit()
+        flash("✅ Plan de pago creado.")
+        return redirect(url_for("listar_planes_pago"))
+
+    return render_template("planes_pago/crear.html")
+
+@app.route("/planes-pago/editar/<int:id>", methods=["GET", "POST"])
+@login_required
+def editar_plan_pago(id):
+    plan = PlanPago.query.get_or_404(id)
+
+    if request.method == "POST":
+        plan.nombre = request.form["nombre"]
+        plan.cantidad_pagos = int(request.form["cantidad_pagos"])
+        plan.dias_entre_pagos = int(request.form["dias_entre_pagos"])
+        plan.notas = request.form.get("notas", "")
+        db.session.commit()
+        flash("✅ Plan de pago actualizado.")
+        return redirect(url_for("listar_planes_pago"))
+
+    return render_template("planes_pago/editar.html", plan=plan)
+
+@app.route("/planes-pago/eliminar/<int:id>", methods=["POST"])
+@login_required
+def eliminar_plan_pago(id):
+    plan = PlanPago.query.get_or_404(id)
+    db.session.delete(plan)
+    db.session.commit()
+    flash("🗑️ Plan de pago eliminado.")
+    return redirect(url_for("listar_planes_pago"))
+
+# METODOS PAGO 
+@app.route('/metodos-pago')
+@login_required
+def listar_metodos_pago():
+    metodos = MetodoPago.query.order_by(MetodoPago.nombre).all()
+    return render_template('metodos_pago/listar.html', metodos=metodos)
+
+@app.route('/metodos-pago/nuevo', methods=['GET', 'POST'])
+@login_required
+def crear_metodo_pago():
+    if request.method == 'POST':
+        nombre = request.form['nombre']
+        porcentaje = float(request.form['porcentaje'])
+
+        nuevo = MetodoPago(nombre=nombre, porcentaje_comision=porcentaje)
+        db.session.add(nuevo)
+        db.session.commit()
+        flash("✅ Método de pago creado.")
+        return redirect(url_for('listar_metodos_pago'))
+    return render_template('metodos_pago/crear.html')
+
+@app.route('/metodos-pago/editar/<int:id>', methods=['GET', 'POST'])
+@login_required
+def editar_metodo_pago(id):
+    metodo = MetodoPago.query.get_or_404(id)
+    if request.method == 'POST':
+        metodo.nombre = request.form['nombre']
+        metodo.porcentaje_comision = float(request.form['porcentaje'])
+        db.session.commit()
+        flash("✅ Método de pago actualizado.")
+        return redirect(url_for('listar_metodos_pago'))
+    return render_template('metodos_pago/editar.html', metodo=metodo)
+
+@app.route('/metodos-pago/eliminar/<int:id>', methods=['POST'])
+@login_required
+def eliminar_metodo_pago(id):
+    metodo = MetodoPago.query.get_or_404(id)
+    db.session.delete(metodo)
+    db.session.commit()
+    flash("🗑️ Método de pago eliminado.")
+    return redirect(url_for('listar_metodos_pago'))
 
 iniciar_scheduler(app)
 app.register_blueprint(bot_bp)

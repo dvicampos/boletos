@@ -3,6 +3,15 @@
 {% block title %}Registrar Pago{% endblock %}
 
 {% block content %}
+<script>
+  const metodosComision = {
+    {% for metodo in metodos_pago %}
+      "{{ metodo.id }}": {{ metodo.porcentaje_comision }},
+    {% endfor %}
+  };
+  console.log("metodosComision cargado:", metodosComision);
+</script>
+
 <h2 class="mb-4">🎟️ Registrar Pago Manual</h2>
 
 <form method="POST" class="card p-4 shadow mb-5 border border-2 bg-light">
@@ -83,29 +92,46 @@
   {% endif %}
 
   <div class="mb-3">
-    <label class="form-label">📆 Tipo de pago</label>
-    <select class="form-select" name="tipo_pago">
-      <option value="">Contado</option>
-      <option value="mensual" {% if request.form.get('tipo_pago') == 'mensual' %}selected{% endif %}>Mensual</option>
-      <option value="semanal" {% if request.form.get('tipo_pago') == 'semanal' %}selected{% endif %}>Semanal</option>
+    <label class="form-label">📋 Plan de Pago (opcional)</label>
+    <select name="plan_pago_id" id="plan_pago_select" class="form-select">
+      <option value="">Sin plan – manual</option>
+      {% for plan in planes_pago %}
+        <option value="{{ plan.id }}"
+                data-nombre="{{ plan.nombre }}"
+                data-pagos="{{ plan.cantidad_pagos }}"
+                data-dias="{{ plan.dias_entre_pagos }}"
+                {% if request.form.get('plan_pago_id') == plan.id|string %}selected{% endif %}>
+          {{ plan.nombre }} ({{ plan.cantidad_pagos }} pagos cada {{ plan.dias_entre_pagos }} días)
+        </option>
+      {% endfor %}
     </select>
   </div>
 
+
+  <div class="mb-3">
+    <label class="form-label">📆 Tipo de pago</label>
+    <input type="text" name="tipo_pago" id="tipo_pago_input" class="form-control"
+          value="{{ request.form.get('tipo_pago', '') }}" placeholder="Ej. mensual, semanal, personalizado" readonly>
+  </div>
+
+
   <div class="mb-3">
     <label class="form-label">🧾 Parcialidad</label>
-    <input type="text" class="form-control" name="parcialidad" placeholder="Ej. 1 de 4"
-      value="{{ request.form.get('parcialidad', '') }}">
+    <input type="text" class="form-control" name="parcialidad" id="parcialidad_input"
+          placeholder="Ej. 1 de 4" value="{{ request.form.get('parcialidad', '') }}" readonly>
   </div>
+
 
   <div class="mb-3">
     <label class="form-label">💳 Método de Pago</label>
     <select class="form-select" name="notas" required>
       <option value="">Selecciona un método</option>
-      <option value="efectivo" {% if request.form.get('notas') == 'efectivo' %}selected{% endif %}>Efectivo</option>
-      <option value="transferencia" {% if request.form.get('notas') == 'transferencia' %}selected{% endif %}>Transferencia</option>
-      <option value="tarjeta" {% if request.form.get('notas') == 'tarjeta' %}selected{% endif %}>Tarjeta</option>
-      <option value="mercado_pago" {% if request.form.get('notas') == 'mercado_pago' %}selected{% endif %}>MercadoPago</option>
-      <option value="paypal" {% if request.form.get('notas') == 'paypal' %}selected{% endif %}>PayPal</option>
+      {% for metodo in metodos_pago %}
+        <option value="{{ metodo.id|string }}"
+          {% if request.form.get('notas') == metodo.id|string %}selected{% endif %}>
+          {{ metodo.nombre }} ({{ metodo.porcentaje_comision }}%)
+        </option>
+      {% endfor %}
     </select>
   </div>
 
@@ -131,12 +157,11 @@
 <div id="resumen_pago" class="alert alert-primary mt-4"></div>
 
 <script>
-  let preciosPorZona = {{ evento.precios_por_zona|cargar_json | tojson }};
+  let preciosPorZona = {{ evento.precios_por_zona | cargar_json | tojson }};
 
   function actualizarSeleccion() {
     const seleccionados = document.querySelectorAll('input[name="asientos"]:checked');
-    const totalSeleccionados = seleccionados.length;
-    document.getElementById('seleccionados').innerText = totalSeleccionados;
+    document.getElementById('seleccionados').innerText = seleccionados.length;
     calcularMontos();
   }
 
@@ -149,13 +174,15 @@
     const montoInput = document.querySelector('input[name="monto"]');
     const abonadoInput = document.querySelector('input[name="abonado"]');
     const parcialidadInput = document.querySelector('input[name="parcialidad"]');
-    const tipoPago = document.querySelector('select[name="tipo_pago"]').value;
+    const tipoPago = document.querySelector('input[name="tipo_pago"]').value.toLowerCase();
     const resumen = document.getElementById('resumen_pago');
     const restanteDiv = document.getElementById('restante_info');
+    const metodoSelect = document.querySelector('select[name="notas"]');
 
     let total = 0;
     let errores = [];
 
+    // 💺 Sumar precios por zona
     asientosSeleccionados.forEach(asiento => {
       const zona = obtenerZona(asiento.value);
       const precio = preciosPorZona[zona];
@@ -166,50 +193,65 @@
       }
     });
 
-    if (errores.length > 0) {
+    if (errores.length > 0 && total === 0) {
       resumen.innerHTML = `<div class="alert alert-warning">⚠️ No se encontraron precios para las zonas: ${errores.join(', ')}</div>`;
       montoInput.value = '';
       restanteDiv.style.display = 'none';
       return;
     }
 
-    montoInput.value = total.toFixed(2);
+    // 💳 Comisión por método
+    let porcentaje = 0;
+    const metodoId = metodoSelect?.value?.toString();
+    if (metodoId && Object.prototype.hasOwnProperty.call(metodosComision, metodoId)) {
+      porcentaje = parseFloat(metodosComision[metodoId]) || 0;
+    }
+    const comision = total * (porcentaje / 100);
+    const totalConComision = total + comision;
 
-    let abonado = parseFloat(abonadoInput.value || 0);
-    let restante = total - abonado;
+    montoInput.value = totalConComision.toFixed(2);
+
+    // 💸 Restante
+    const abonado = parseFloat(abonadoInput.value || 0);
+    let restante = totalConComision - abonado;
     if (restante < 0) restante = 0;
 
-    let parcialidadTexto = parcialidadInput.value.trim();
+    // 📆 Número de pagos
+    const parcialidadTexto = parcialidadInput.value.trim();
     let totalParcialidades = 1;
-
     if (parcialidadTexto.includes("de")) {
       const partes = parcialidadTexto.split("de");
       const num = parseInt(partes[1].trim());
-      if (!isNaN(num) && num > 0) totalParcialidades = num;
+      if (!isNaN(num)) totalParcialidades = num;
     } else {
       const num = parseInt(parcialidadTexto);
-      if (!isNaN(num) && num > 0) totalParcialidades = num;
+      if (!isNaN(num)) totalParcialidades = num;
     }
 
+    // 🧾 Mostrar resumen
     let resumenTexto = "";
+    if (tipoPago === "mensual" || tipoPago === "semanal") {
+      const label = tipoPago === "mensual" ? "mensual" : "semanal";
+      const dias = tipoPago === "mensual" ? 30 : 7;
+      const cuota = (restante / totalParcialidades).toFixed(2);
 
-    if (tipoPago === "mensual") {
-      const mensual = (restante / totalParcialidades).toFixed(2);
       resumenTexto = `
-        💡 <strong>Pago mensual:</strong> ${totalParcialidades} pagos de <strong>$${mensual}</strong><br>
+        💡 <strong>Pago ${label}:</strong> ${totalParcialidades} pagos de <strong>$${cuota}</strong><br>
         💸 <strong>Ya abonaste:</strong> $${abonado.toFixed(2)}<br>
         💰 <strong>Restante:</strong> $${restante.toFixed(2)}<br>
-        📅 Cada 30 días`;
-    } else if (tipoPago === "semanal") {
-      const semanal = (restante / totalParcialidades).toFixed(2);
-      resumenTexto = `
-        💡 <strong>Pago semanal:</strong> ${totalParcialidades} pagos de <strong>$${semanal}</strong><br>
-        💸 <strong>Ya abonaste:</strong> $${abonado.toFixed(2)}<br>
-        💰 <strong>Restante:</strong> $${restante.toFixed(2)}<br>
-        📅 Cada 7 días`;
+        📅 Cada ${dias} días`;
     } else {
       resumenTexto = `
-        💵 <strong>Pago único:</strong> ${asientosSeleccionados.length} asientos = <strong>$${total.toFixed(2)}</strong><br>
+        💵 <strong>Pago único:</strong> ${asientosSeleccionados.length} asientos = <strong>$${total.toFixed(2)}</strong><br>`;
+      if (porcentaje > 0) {
+        resumenTexto += `
+        💳 <strong>Comisión aplicada:</strong> ${porcentaje.toFixed(2)}% = $${comision.toFixed(2)}<br>
+        💰 <strong>Total con comisión:</strong> $${totalConComision.toFixed(2)}<br>
+        <span class="text-danger">⚠️ Se aplicó una comisión por el método de pago seleccionado.</span><br>`;
+      } else {
+        resumenTexto += `💰 <strong>Total:</strong> $${total.toFixed(2)}<br>`;
+      }
+      resumenTexto += `
         💸 <strong>Ya abonaste:</strong> $${abonado.toFixed(2)}<br>
         💰 <strong>Restante:</strong> $${restante.toFixed(2)}`;
     }
@@ -222,13 +264,30 @@
   document.addEventListener('DOMContentLoaded', () => {
     actualizarSeleccion();
 
-    document.querySelectorAll('input[name="asientos"]').forEach(el => {
-      el.addEventListener('change', actualizarSeleccion);
-    });
+    document.querySelectorAll('input[name="asientos"]').forEach(el =>
+      el.addEventListener('change', actualizarSeleccion)
+    );
 
     document.querySelector('input[name="abonado"]').addEventListener('input', calcularMontos);
-    document.querySelector('select[name="tipo_pago"]').addEventListener('change', calcularMontos);
+    document.querySelector('select[name="notas"]').addEventListener('change', calcularMontos);
     document.querySelector('input[name="parcialidad"]').addEventListener('input', calcularMontos);
+    document.querySelector('input[name="tipo_pago"]').addEventListener('input', calcularMontos);
+  });
+
+  document.getElementById("plan_pago_select").addEventListener("change", function () {
+    const selected = this.options[this.selectedIndex];
+    const nombre = selected.getAttribute("data-nombre");
+    const pagos = selected.getAttribute("data-pagos");
+
+    if (nombre && pagos) {
+      document.getElementById("tipo_pago_input").value = nombre.toLowerCase();
+      document.getElementById("parcialidad_input").value = `1 de ${pagos}`;
+    } else {
+      document.getElementById("tipo_pago_input").value = '';
+      document.getElementById("parcialidad_input").value = '';
+    }
+
+    calcularMontos();
   });
 </script>
 

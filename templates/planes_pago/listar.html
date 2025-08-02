@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>📄 Planes de Pago</h2>
+<a href="{{ url_for('crear_plan_pago') }}" class="btn btn-success mb-3">➕ Nuevo Plan</a>
+
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Nombre</th>
+      <th>Pagos</th>
+      <th>Días entre pagos</th>
+      <th>Notas</th>
+      <th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for plan in planes %}
+      <tr>
+        <td>{{ plan.nombre }}</td>
+        <td>{{ plan.cantidad_pagos }}</td>
+        <td>{{ plan.dias_entre_pagos }}</td>
+        <td>{{ plan.notas }}</td>
+        <td>
+          <a href="{{ url_for('editar_plan_pago', id=plan.id) }}" class="btn btn-sm btn-primary">✏️</a>
+          <form action="{{ url_for('eliminar_plan_pago', id=plan.id) }}" method="POST" style="display:inline;">
+            <button class="btn btn-sm btn-danger" onclick="return confirm('¿Eliminar este plan?')">🗑️</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

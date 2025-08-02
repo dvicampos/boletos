@@ -1,0 +1,29 @@
+{% extends 'base.html' %}
+{% block title %}Métodos de Pago{% endblock %}
+{% block content %}
+<h2>💳 Métodos de Pago</h2>
+<a href="{{ url_for('crear_metodo_pago') }}" class="btn btn-success mb-3">➕ Nuevo</a>
+<table class="table table-striped">
+  <thead>
+    <tr>
+      <th>Nombre</th>
+      <th>Comisión (%)</th>
+      <th>Acciones</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for m in metodos %}
+    <tr>
+      <td>{{ m.nombre }}</td>
+      <td>{{ '%.2f'|format(m.porcentaje_comision) }}</td>
+      <td>
+        <a href="{{ url_for('editar_metodo_pago', id=m.id) }}" class="btn btn-sm btn-primary">✏️</a>
+        <form action="{{ url_for('eliminar_metodo_pago', id=m.id) }}" method="POST" style="display:inline;">
+          <button class="btn btn-sm btn-danger" onclick="return confirm('¿Eliminar?')">🗑️</button>
+        </form>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

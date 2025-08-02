@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>{{ 'Editar' if plan else 'Nuevo' }} Plan de Pago</h2>
+<form method="POST" class="card p-4 shadow-sm">
+  <label>📛 Nombre</label>
+  <input type="text" class="form-control mb-3" name="nombre" required value="{{ plan.nombre if plan else '' }}">
+
+  <label>💳 Cantidad de pagos</label>
+  <input type="number" class="form-control mb-3" name="cantidad_pagos" required value="{{ plan.cantidad_pagos if plan else 1 }}">
+
+  <label>⏱️ Días entre pagos</label>
+  <input type="number" class="form-control mb-3" name="dias_entre_pagos" required value="{{ plan.dias_entre_pagos if plan else 30 }}">
+
+  <label>📝 Notas</label>
+  <textarea class="form-control mb-3" name="notas">{{ plan.notas if plan else '' }}</textarea>
+
+  <button class="btn btn-primary">💾 Guardar</button>
+  <a href="{{ url_for('listar_planes_pago') }}" class="btn btn-secondary">↩️ Cancelar</a>
+</form>
+{% endblock %}

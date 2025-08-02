@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block title %}Editar Método de Pago{% endblock %}
+{% block content %}
+<h2>✏️ Editar Método de Pago</h2>
+<form method="POST">
+  <div class="mb-3">
+    <label class="form-label">Nombre</label>
+    <input type="text" name="nombre" class="form-control" value="{{ metodo.nombre }}" required>
+  </div>
+  <div class="mb-3">
+    <label class="form-label">Porcentaje Comisión (%)</label>
+    <input type="number" step="0.01" name="porcentaje" class="form-control" value="{{ metodo.porcentaje_comision }}" required>
+  </div>
+  <button class="btn btn-primary">Actualizar</button>
+</form>
+{% endblock %}

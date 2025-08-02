@@ -35,35 +35,56 @@ class Evento(db.Model):
 
 
 # parcialidad
-class PlanParcialidad(db.Model):
+class PlanPago(db.Model):
+    __tablename__ = 'plan_pago'
+
     id = db.Column(db.Integer, primary_key=True)
     nombre = db.Column(db.String(100), nullable=False)
-    tipo = db.Column(db.String(20))  # 'semanal', 'mensual', etc.
-    numero_parcialidades = db.Column(db.Integer)
-    dias_entre_pagos = db.Column(db.Integer)
-    incluye_comision = db.Column(db.Boolean, default=False)
-    porcentaje_comision = db.Column(db.Float, default=0.0)
-    descripcion = db.Column(db.Text)
+    cantidad_pagos = db.Column(db.Integer, nullable=False)
+    dias_entre_pagos = db.Column(db.Integer, nullable=False)
+    notas = db.Column(db.String(255))
 
-    pagos = db.relationship('Pago', backref='plan', lazy=True)  # ← ESTA RELACIÓN YA FUNCIONA BIEN
+    def __repr__(self):
+        return f"<PlanPago {self.nombre} ({self.cantidad_pagos} pagos / cada {self.dias_entre_pagos} días)>"
 
 class Pago(db.Model):
+    __tablename__ = 'pago'
+
     id = db.Column(db.Integer, primary_key=True)
     usuario_id = db.Column(db.Integer, db.ForeignKey('usuario.id'), nullable=False)
     evento_id = db.Column(db.Integer, db.ForeignKey('evento.id'), nullable=False)
-    plan_id = db.Column(db.Integer, db.ForeignKey('plan_parcialidad.id'))  # ya correcto
+
+    # Relación con plan de pago
+    plan_id = db.Column(db.Integer, db.ForeignKey('plan_pago.id'), nullable=True)
+    plan = db.relationship('PlanPago', backref='pagos')  # Esto permite acceder como pago.plan.nombre
+
     asiento = db.Column(db.String(50), nullable=False)
     fecha_pago = db.Column(db.DateTime, default=datetime.utcnow)
-    monto = db.Column(db.Float, nullable=False)
-    abonado = db.Column(db.Float)
-    confirmado = db.Column(db.Boolean, default=False)
-    tipo_pago = db.Column(db.String(20))
-    parcialidad = db.Column(db.String(50))
-    notas = db.Column(db.Text)
-    estatus_pago = db.Column(db.String(20), default='pendiente')
 
-    numero_parcialidad = db.Column(db.Integer)  # ← este causaba el error
-    total_parcialidades = db.Column(db.Integer)
+    monto = db.Column(db.Float, nullable=False)
+    abonado = db.Column(db.Float, default=0.0)
+    confirmado = db.Column(db.Boolean, default=False)
+
+    tipo_pago = db.Column(db.String(20))  # contado, semanal, mensual, etc.
+    parcialidad = db.Column(db.String(50))  # Ej: "1 de 4"
+    notas = db.Column(db.Text)
+
+    estatus_pago = db.Column(db.String(20), default='pendiente')  # pendiente, parcial, liquidado
+
+    # Nuevos campos para identificar posición del pago dentro del plan
+    numero_parcialidad = db.Column(db.Integer)         # Ej: 1, 2, 3...
+    total_parcialidades = db.Column(db.Integer)        # Total del plan, ej: 4
+
+    def __repr__(self):
+        return f"<Pago usuario={self.usuario_id} evento={self.evento_id} asiento={self.asiento}>"
+
+
+class MetodoPago(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    nombre = db.Column(db.String(50), unique=True, nullable=False)  # 'efectivo', 'paypal', etc.
+    porcentaje_comision = db.Column(db.Float, default=0.0)
+    def __repr__(self):
+        return f"<MetodoPago {self.nombre} ({self.porcentaje_comision}%)>"
 
 
 class Recordatorio(db.Model):

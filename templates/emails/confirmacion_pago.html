@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+  <body style="font-family: Arial, sans-serif; color: #333;">
+    <h2>🎟️ Resumen de tu compra para {{ evento.nombre }}</h2>
+    <p>👤 <strong>{{ usuario.nombre }}</strong></p>
+    <p>🎫 <strong>Asientos:</strong> {{ asientos | join(', ') }}</p>
+    <p>💰 <strong>Monto total:</strong> ${{ '%.2f' % monto_total }}</p>
+    {% if comision > 0 %}
+    <p>💳 <strong>Comisión aplicada:</strong> {{ metodo.nombre }} – {{ metodo.porcentaje_comision }}% ({{ '%.2f' % comision }})</p>
+    {% endif %}
+    <p>📅 <strong>Tipo de pago:</strong> {{ tipo_pago or 'contado' }}</p>
+    <p>💸 <strong>Monto abonado:</strong> ${{ '%.2f' % abonado }}</p>
+
+    {% if recordatorios %}
+      <h4>📅 Próximos pagos:</h4>
+      <ul>
+        {% for fecha, pago in recordatorios %}
+          <li>{{ fecha.strftime('%d/%m/%Y') }} → ${{ '%.2f' % pago }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+
+    <p>✅ ¡Gracias por tu compra! Recibirás recordatorios automáticos.</p>
+  </body>
+</html>
